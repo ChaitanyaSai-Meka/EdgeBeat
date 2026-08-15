@@ -29,19 +29,40 @@ Current version: `1.0.0`
 ## Requirements
 
 - macOS 14.4 or later
-- Xcode Command Line Tools
 - Spotify for macOS, Apple Music, or both
 - A Mac account allowed to grant system-audio permissions
+- Xcode Command Line Tools only when building from source
 
 The project is primarily developed and verified on Apple Silicon. The bundled
 MediaRemoteAdapter framework includes both Apple Silicon and Intel architectures.
 
 ## Installation
 
-EdgeBeat is currently distributed as source code. Build the application locally
-using the included script.
+### Install a Release
 
-### 1. Install the Command Line Tools
+1. Download `EdgeBeat.zip` from the official
+   [EdgeBeat Releases](https://github.com/ChaitanyaSai-Meka/EdgeBeat/releases) page.
+2. Double-click `EdgeBeat.zip` in Finder to extract `EdgeBeat.app`.
+3. Move `EdgeBeat.app` to the Applications folder.
+4. Open Terminal, type `xattr -r -c`, add a space, and drag `EdgeBeat.app` from
+   the Applications folder into the Terminal window. Press Return to run the
+   completed command:
+
+```sh
+xattr -r -c /Applications/EdgeBeat.app
+```
+
+5. Open `EdgeBeat.app` from the Applications folder. EdgeBeat runs in the menu
+   bar and does not display a Dock icon.
+
+The release uses an ad-hoc code signature and is not notarized by Apple. macOS may
+therefore quarantine the downloaded application. The `xattr` command clears those
+download attributes. Run it only for an archive downloaded from the official
+EdgeBeat repository.
+
+### Build from Source
+
+#### 1. Install the Command Line Tools
 
 Open Terminal and run:
 
@@ -52,14 +73,14 @@ xcode-select --install
 If the tools are already installed, macOS will report that no installation is
 necessary.
 
-### 2. Clone the repository
+#### 2. Clone the Repository
 
 ```sh
 git clone https://github.com/ChaitanyaSai-Meka/EdgeBeat.git
 cd EdgeBeat
 ```
 
-### 3. Build EdgeBeat
+#### 3. Build EdgeBeat
 
 ```sh
 bash scripts/build.sh
@@ -68,7 +89,7 @@ bash scripts/build.sh
 The script performs a release build, assembles `EdgeBeat.app`, copies the required
 resources, and applies an ad-hoc code signature.
 
-### 4. Launch EdgeBeat
+#### 4. Launch EdgeBeat
 
 ```sh
 open EdgeBeat.app
@@ -83,7 +104,7 @@ You can build and launch in one command during development:
 bash scripts/run.sh
 ```
 
-### 5. Install in Applications
+#### 5. Install in Applications
 
 After building, the app can be placed in `/Applications`:
 
@@ -169,6 +190,18 @@ area and is shown only on the main display.
 Select `Check for Updates...` from the EdgeBeat menu. The app checks only the
 official [EdgeBeat GitHub Releases](https://github.com/ChaitanyaSai-Meka/EdgeBeat/releases)
 feed. When a newer version is available, EdgeBeat offers to open its release page.
+
+To update an installed release:
+
+1. Quit EdgeBeat.
+2. Download and extract the latest `EdgeBeat.zip` from the release page.
+3. Replace the existing application in the Applications folder.
+4. Run the quarantine-clearing command again before opening the new version:
+
+```sh
+xattr -r -c /Applications/EdgeBeat.app
+open /Applications/EdgeBeat.app
+```
 
 To update directly from source instead, run the following commands from the
 repository directory:
