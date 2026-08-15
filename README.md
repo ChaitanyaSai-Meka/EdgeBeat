@@ -8,6 +8,8 @@ The application runs from the menu bar, stays visible over full-screen apps,
 supports multiple displays, follows the physical MacBook notch, and can show an
 interactive now-playing card on the lock screen.
 
+Current version: `1.0.0`
+
 ## Features
 
 - Music-reactive edge waves driven by real system audio
@@ -350,6 +352,5 @@ The lock-screen implementation was informed by the open-source
 
 ## Project License
 
-This repository does not currently include a project-wide license. Source availability
-does not grant permission to redistribute or publish modified versions unless the
-project owner adds an explicit license.
+EdgeBeat is open-source software released under the
+[MIT License](LICENSE). Copyright (c) 2026 Chaitanya Sai Meka.
