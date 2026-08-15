@@ -122,9 +122,10 @@ MenuBarController ─── toggles panel / intensity ────────�
   click-through (`ignoresMouseEvents`), `level = .screenSaver`, `collectionBehavior`
   spanning all Spaces + full-screen apps. Sized to `NSScreen.main.frame` and re-laid-out
   on display changes.
-- **EdgeGlowView** — SwiftUI: an inset rounded-rect stroke + wide blur bloom filled with a
-  palette gradient hugging all four edges; opacity/width driven by `level`, extra bloom on
-  `beat`, slow hue drift; honors the intensity slider.
+- **EdgeGlowView** — SwiftUI `Canvas`: independent, edge-to-edge filled wave fields on all
+  four sides, layered into a broad halo, tighter glow, and bright core. Wave depth follows
+  the captured PCM envelope, color follows the artwork palette, and beat pulses add bloom;
+  there is no enclosing rounded frame or independent animation clock.
 
 ### Why these choices
 

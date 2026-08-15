@@ -7,8 +7,9 @@ struct AudioFeatures {
     var mid: Double
     var treble: Double
     var beat: Bool
+    var waveform: [Double]
 
-    static let silence = AudioFeatures(level: 0, bass: 0, mid: 0, treble: 0, beat: false)
+    static let silence = AudioFeatures(level: 0, bass: 0, mid: 0, treble: 0, beat: false, waveform: [])
 }
 
 final class BeatAnalyzer {
@@ -24,6 +25,7 @@ final class BeatAnalyzer {
     private var bassHistory: [Double] = []
     private var lastBeatTime = 0.0
     private var lastPublishTime = 0.0
+    private var previousWaveform = [Double](repeating: 0, count: 192)
 
     init?() {
         log2Size = vDSP_Length(log2(Float(fftSize)))
@@ -94,15 +96,16 @@ final class BeatAnalyzer {
         let isBeat = bass > baseline * 1.5 && bass > 0.012 && now - lastBeatTime > 0.22
         if isBeat { lastBeatTime = now }
 
+        guard isBeat || now - lastPublishTime >= 1.0 / 24.0 else { return }
+        lastPublishTime = now
         let features = AudioFeatures(
             level: smoothedLevel,
             bass: normalizeBand(bass),
             mid: normalizeBand(mid),
             treble: normalizeBand(treble),
-            beat: isBeat
+            beat: isBeat,
+            waveform: makeWaveform(from: samples)
         )
-        guard isBeat || now - lastPublishTime >= 1.0 / 30.0 else { return }
-        lastPublishTime = now
         DispatchQueue.main.async { [weak self] in self?.onFeatures?(features) }
     }
 
@@ -118,5 +121,42 @@ final class BeatAnalyzer {
 
     private func normalizeBand(_ value: Double) -> Double {
         min(1, max(0, sqrt(value) * 0.18))
+    }
+
+    private func makeWaveform(from samples: [Float]) -> [Double] {
+        let pointCount = previousWaveform.count
+        let binSize = max(1, samples.count / pointCount)
+        var waveform = [Double](repeating: 0, count: pointCount)
+
+        for point in 0..<pointCount {
+            let start = point * binSize
+            let end = min(samples.count, start + binSize)
+            guard start < end else { continue }
+            var energy = 0.0
+            for index in start..<end {
+                let sample = Double(samples[index])
+                energy += sample * sample
+            }
+            waveform[point] = sqrt(energy / Double(end - start))
+        }
+
+        let peak = waveform.max() ?? 0
+        if peak > 0.0001 {
+            for index in waveform.indices { waveform[index] /= peak }
+        }
+
+        if waveform.count > 2 {
+            var spatiallySmoothed = waveform
+            for index in 1..<(waveform.count - 1) {
+                spatiallySmoothed[index] = (waveform[index - 1] + waveform[index] * 2 + waveform[index + 1]) / 4
+            }
+            waveform = spatiallySmoothed
+        }
+
+        for index in waveform.indices {
+            waveform[index] = previousWaveform[index] * 0.58 + waveform[index] * 0.42
+        }
+        previousWaveform = waveform
+        return waveform
     }
 }
