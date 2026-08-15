@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:edge}",
+            "name": "Debug EdgeBeat",
+            "target": "EdgeBeat",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug EdgeBeat"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:edge}",
+            "name": "Release EdgeBeat",
+            "target": "EdgeBeat",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release EdgeBeat"
+        }
+    ]
+}

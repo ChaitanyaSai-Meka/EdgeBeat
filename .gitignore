@@ -1,0 +1,13 @@
+# SwiftPM and compiler output
+.build/
+.swiftpm/
+
+# Generated application bundle and signing artifacts
+EdgeBeat.app/
+*.dSYM/
+
+# macOS metadata
+.DS_Store
+
+# Local editor/agent settings
+.claude/settings.local.json
