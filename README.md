@@ -135,6 +135,9 @@ Fallback Automation permissions can be reviewed under:
 
 The lock-screen card uses private macOS SkyLight APIs. No separate user permission
 is normally displayed, but compatibility can change between macOS releases.
+When the card is enabled and music is actively playing, EdgeBeat temporarily keeps
+the display awake while the Mac is locked. This activity is released when playback
+stops, the card is disabled, the Mac unlocks, or EdgeBeat quits.
 
 ## Using EdgeBeat
 

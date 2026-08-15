@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let audioTap = AudioTapEngine()
     private let beatAnalyzer: BeatAnalyzer? = BeatAnalyzer()
     private let updateChecker = GitHubUpdateChecker()
+    private let displaySleepController = DisplaySleepController()
     private var menuBar: MenuBarController?
     private var currentTrack = NowPlayingTrack.empty
     private var isAudioCaptureRequested = false
@@ -36,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         nowPlaying.stop()
         audioTap.stop()
+        displaySleepController.setPrevented(false)
     }
 
     private func configureMenuBar() {
@@ -68,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay.refreshLockScreenCard()
             menuBar?.setNowPlaying(track)
             syncAudioCapture()
+            syncDisplaySleepPrevention()
         }
         beatAnalyzer?.onFeatures = { [weak self] features in
             guard let self,
@@ -90,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if enabled { overlay.show() } else { overlay.hide() }
                 syncAudioCapture()
+                syncDisplaySleepPrevention()
             }
             .store(in: &cancellables)
 
@@ -106,7 +110,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         preferences.$nowPlayingCardEnabled
             .removeDuplicates()
-            .sink { [weak self] _ in self?.overlay.refreshLockScreenCard() }
+            .sink { [weak self] _ in
+                self?.overlay.refreshLockScreenCard()
+                self?.syncDisplaySleepPrevention()
+            }
+            .store(in: &cancellables)
+
+        preferences.$isScreenLocked
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.syncDisplaySleepPrevention() }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)
@@ -164,6 +176,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         syncAudioCapture()
+        syncDisplaySleepPrevention()
+    }
+
+    private func syncDisplaySleepPrevention() {
+        let shouldPrevent = preferences.enabled
+            && preferences.nowPlayingCardEnabled
+            && preferences.isScreenLocked
+            && currentTrack.state == .playing
+            && !areDisplaysAsleep
+        displaySleepController.setPrevented(shouldPrevent)
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) -> Bool {
