@@ -3,6 +3,7 @@ import SwiftUI
 
 final class RenderState: ObservableObject {
     @Published private(set) var palette = GlowPalette.default
+    @Published private(set) var track = NowPlayingTrack.empty
     @Published private(set) var level: Double = 0
     @Published private(set) var beat: Bool = false
     private(set) var waveform: [Double] = []
@@ -11,17 +12,30 @@ final class RenderState: ObservableObject {
     @Published private(set) var trackArtist = ""
 
     private var beatResetWork: DispatchWorkItem?
+    private var paletteTrackIdentifier = ""
 
     func update(track: NowPlayingTrack) {
-        isPlaying = track.state == .playing
-        trackTitle = track.title
-        trackArtist = track.artist
-        if track.artwork != nil {
+        let artworkChanged = (self.track.artwork == nil) != (track.artwork == nil)
+        if self.track.identifier != track.identifier
+            || self.track.state != track.state
+            || self.track.position != track.position
+            || artworkChanged {
+            self.track = track
+        }
+        let playing = track.state == .playing
+        if isPlaying != playing { isPlaying = playing }
+        if trackTitle != track.title { trackTitle = track.title }
+        if trackArtist != track.artist { trackArtist = track.artist }
+        if track.artwork != nil, track.identifier != paletteTrackIdentifier {
             palette = PaletteExtractor.extract(from: track.artwork)
+            paletteTrackIdentifier = track.identifier
         } else if track.identifier.isEmpty {
             palette = .default
+            paletteTrackIdentifier = ""
         }
-        if !isPlaying { level = 0 }
+        if !playing, level != 0 {
+            withAnimation(.easeOut(duration: 0.4)) { level = 0 }
+        }
     }
 
     func update(audio: AudioFeatures) {

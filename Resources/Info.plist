@@ -25,6 +25,6 @@
     <key>NSAppleEventsUsageDescription</key>
     <string>EdgeBeat reads the current song and album artwork from Spotify and Apple Music so it can color the edge lighting to match what you're listening to.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>EdgeBeat captures audio from the active music player to synchronize the edge lighting with its beat.</string>
+    <string>EdgeBeat captures system audio from the active music player to synchronize the edge lighting. It does not record or access your microphone.</string>
 </dict>
 </plist>

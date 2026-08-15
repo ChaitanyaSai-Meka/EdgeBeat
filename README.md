@@ -18,11 +18,12 @@ everything, including full-screen apps and across all Spaces.
 | 2 | Overlay panel + edge glow rendering | ✅ Done |
 | 3 | Now-playing + album-art color palette | ✅ Done |
 | 4 | Audio capture + beat detection | ✅ Done |
-| 5 | Polish: intensity, permissions, signing | ✅ Done |
+| 5 | Polish: preferences, displays, card, permissions, signing | ✅ Done |
 
-> The current build includes the overlay, brightness and source controls, player detection,
-> artwork colors, and beat-reactive animation. Audio capture falls back to a global tap
-> when a player-specific tap is unavailable.
+> The current build includes music-synced, ambient, and static animation modes; album or
+> custom colors; single/gradient rendering; glow and thickness controls; persistent
+> settings; multi-display targeting; an optional lock-screen now-playing card; and
+> Launch at Login.
 
 ---
 
@@ -48,8 +49,9 @@ open EdgeBeat.app          # launch (menu-bar icon appears; no Dock icon)
 bash scripts/run.sh
 ```
 
-A waveform icon appears in the menu bar. Use it to select a player, adjust brightness,
-toggle the lighting, open privacy settings, or quit.
+A waveform icon appears in the menu bar. It provides immediate access to the lighting
+toggle, animation mode, album/custom colors, glow, thickness, display targeting, the
+lock-screen now-playing card, music source, Launch at Login, privacy settings, and quit.
 
 To stop it from the terminal:
 
@@ -101,7 +103,8 @@ AudioTapEngine ──PCM──▶ BeatAnalyzer ──▶ AudioFeatures ─┐
                                                         ├─▶ RenderState ─▶ EdgeGlowView
 NowPlayingMonitor ──artwork──▶ PaletteExtractor ──▶ Palette ─┘        (inside OverlayPanel)
 
-MenuBarController ─── toggles panel / intensity ───────────────────────────────▶
+AppPreferences ── persisted modes / colors / glow / display / card ───────────▶
+MenuBarController ───────────── updates AppPreferences ────────────────────────▶
 ```
 
 - **AudioTapEngine** — resolves the playing app's PID → audio process object, creates a
@@ -117,20 +120,28 @@ MenuBarController ─── toggles panel / intensity ────────�
   buckets by *population × saturation × mid-brightness* to pick primary/secondary/accent
   colors + a dark background tone; caches per track.
 - **RenderState** — merges `AudioFeatures` + `Palette` into smoothed, animatable render
-  parameters (attack/decay envelopes) that drive the view.
+  parameters and live now-playing progress that drive the view.
+- **AppPreferences** — stores lighting, color, animation, glow, thickness, display, and
+  card choices in native `UserDefaults`, and publishes changes immediately to the UI.
 - **OverlayPanel** — a non-activating, borderless `NSPanel`: clear background,
   click-through (`ignoresMouseEvents`), `level = .screenSaver`, `collectionBehavior`
-  spanning all Spaces + full-screen apps. Sized to `NSScreen.main.frame` and re-laid-out
-  on display changes.
+  spanning all Spaces + full-screen apps. Creates one panel per selected display and
+  re-lays them out when the display arrangement changes.
 - **EdgeGlowView** — SwiftUI `Canvas`: independent, edge-to-edge filled wave fields on all
-  four sides, layered into a broad halo, tighter glow, and bright core. Wave depth follows
-  the captured PCM envelope, color follows the artwork palette, and beat pulses add bloom;
-  there is no enclosing rounded frame or independent animation clock.
+  four sides, layered into a broad halo, tighter glow, and bright core. It supports
+  music-reactive, gently animated ambient, and zero-clock static rendering.
+- **LockScreenNowPlayingView** — a separate, tightly sized lock-screen panel above the
+  profile area, with artwork, progress, and previous/play-pause/next controls. Keeping it
+  separate preserves click-through behavior everywhere outside the widget.
 
 ### Why these choices
 
 - **Core Audio process taps** over ScreenCaptureKit — no Screen Recording permission, no
   periodic re-auth prompts, lower CPU.
+- **Lock-screen card** — uses the same dynamic SkyLight-space technique as
+  [BoringNotch](https://github.com/TheBoredTeam/boring.notch) and its
+  [SkyLightWindow](https://github.com/Lakr233/SkyLightWindow) dependency. This relies on
+  private macOS SkyLight symbols and may require maintenance across macOS releases.
 - **AppleScript** for now-playing — the private MediaRemote framework was gated behind an
   Apple-only entitlement in macOS 15.4, so it's unavailable to third-party apps.
 - **AppKit lifecycle + SwiftUI rendering** — AppKit `NSApplication`/`NSStatusItem` for a
@@ -153,6 +164,7 @@ edge/
 ├── Sources/EdgeBeat/
 │   ├── main.swift                # entry point (accessory activation)
 │   ├── AppDelegate.swift         # wires everything together
+│   ├── AppPreferences.swift      # persisted feature settings
 │   ├── MenuBarController.swift   # status-item menu and controls
 │   ├── OverlayPanel.swift        # click-through overlay window
 │   ├── EdgeGlowView.swift        # SwiftUI glow rendering
@@ -177,8 +189,8 @@ edge/
 2. **Overlay** ✅ — click-through, always-on-top glow across Spaces and full-screen apps.
 3. **Color** ✅ — glow colors follow the current album art and update on track changes.
 4. **Beat** ✅ — glow pulses to captured audio, dims on pause, and follows Spotify/Music.
-5. **Polish** ✅ — source and brightness controls, privacy helper, signing script, and
-   capture fallback status.
+5. **Polish** ✅ — full menu controls, persistence, multi-display targeting, interactive
+   lock-screen card, adaptive polling, Launch at Login, privacy helper, and capture fallback status.
 
 ---
 
@@ -187,7 +199,7 @@ edge/
 - **Beat sync:** real audio capture (true beat matching).
 - **Players:** both Spotify and Apple Music, auto-detected.
 - **Look:** full-perimeter glow.
-- **Displays:** main display only.
+- **Displays:** built-in, current main, or all connected displays.
 - **Notch/top edge:** the glow stays at the true top physical edge and wraps around the
   notch (uses the full screen frame, not the visible frame), with a thin/translucent top
   band so the menu bar underneath stays readable.

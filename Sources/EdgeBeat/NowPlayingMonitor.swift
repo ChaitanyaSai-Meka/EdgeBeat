@@ -4,6 +4,7 @@ import OSLog
 
 final class NowPlayingMonitor {
     var onTrackChange: ((NowPlayingTrack) -> Void)?
+    var onPlaybackUpdate: ((NowPlayingTrack) -> Void)?
 
     private(set) var source: PlayerSource = .automatic {
         didSet {
@@ -12,6 +13,7 @@ final class NowPlayingMonitor {
     }
 
     private var timer: Timer?
+    private var isRunning = false
     private var lastTrack = NowPlayingTrack.empty
     private var pollGeneration = 0
     private var artworkCache: [String: NSImage] = [:]
@@ -21,20 +23,38 @@ final class NowPlayingMonitor {
     private let logger = Logger(subsystem: "com.chaitanya.edgebeat", category: "now-playing")
 
     func start() {
-        guard timer == nil else { return }
+        guard !isRunning else { return }
+        isRunning = true
         pollNow()
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            self?.pollNow()
-        }
     }
 
     func stop() {
+        isRunning = false
         timer?.invalidate()
         timer = nil
     }
 
     func setSource(_ source: PlayerSource) {
         self.source = source
+    }
+
+    func perform(_ command: PlaybackCommand, for source: PlayerSource) {
+        guard source == .spotify || source == .music else { return }
+        let appName = source == .spotify ? "Spotify" : "Music"
+        let script = "tell application \"\(appName)\" to \(command.rawValue)"
+
+        pollQueue.async { [weak self] in
+            guard let self else { return }
+            self.executeAppleScript(script, key: "command.\(source.rawValue).\(command.rawValue)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                self.timer?.invalidate()
+                if self.isPolling {
+                    self.scheduleNextPoll(after: 0.25)
+                } else {
+                    self.pollNow()
+                }
+            }
+        }
     }
 
     private func pollNow() {
@@ -50,12 +70,27 @@ final class NowPlayingMonitor {
                 self.isPolling = false
                 guard generation == self.pollGeneration else { return }
                 let resolvedTrack = track.withArtwork(self.artworkCache[track.identifier])
+                self.onPlaybackUpdate?(resolvedTrack)
                 if resolvedTrack != self.lastTrack {
                     self.lastTrack = resolvedTrack
                     self.onTrackChange?(resolvedTrack)
                     self.loadArtwork(for: track)
                 }
+                let delay: TimeInterval = switch resolvedTrack.state {
+                case .playing: 1.5
+                case .paused: 3
+                case .stopped, .unavailable: 5
+                }
+                self.scheduleNextPoll(after: delay)
             }
+        }
+    }
+
+    private func scheduleNextPoll(after delay: TimeInterval) {
+        guard isRunning else { return }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            self?.pollNow()
         }
     }
 
@@ -79,6 +114,9 @@ final class NowPlayingMonitor {
         let artworkIdentifier = source == .spotify
             ? "artwork url of current track"
             : "persistent ID of current track"
+        let durationExpression = source == .spotify
+            ? "(duration of current track) / 1000"
+            : "duration of current track"
         let script = """
         set separator to ASCII character 31
         if application \"\(appName)\" is running then
@@ -91,7 +129,9 @@ final class NowPlayingMonitor {
             set albumName to album of current track
             set trackID to \"\(source.rawValue)\" & separator & trackName & separator & artistName & separator & albumName
             set trackID to trackID & separator & (\(artworkIdentifier))
-            return stateText & separator & trackID
+            set durationValue to \(durationExpression)
+            set positionValue to player position
+            return stateText & separator & trackID & separator & durationValue & separator & positionValue
           end tell
         end if
         return \"\"
@@ -99,7 +139,7 @@ final class NowPlayingMonitor {
 
         guard let output = runAppleScript(script, key: source.rawValue), !output.isEmpty else { return nil }
         let fields = output.components(separatedBy: String(UnicodeScalar(31)))
-        guard fields.count >= 6 else { return nil }
+        guard fields.count >= 8 else { return nil }
         let state = PlaybackState(rawValue: fields[0]) ?? .unavailable
         let identifier = fields[5]
         let processID = NSRunningApplication.runningApplications(
@@ -113,7 +153,9 @@ final class NowPlayingMonitor {
             artwork: nil,
             identifier: identifier,
             state: state,
-            processID: processID
+            processID: processID,
+            duration: TimeInterval(fields[6]) ?? 0,
+            position: TimeInterval(fields[7]) ?? 0
         )
     }
 
@@ -139,6 +181,7 @@ final class NowPlayingMonitor {
         guard lastTrack.source == track.source, lastTrack.identifier == track.identifier else { return }
         let updatedTrack = track.withArtwork(image)
         lastTrack = updatedTrack
+        onPlaybackUpdate?(updatedTrack)
         onTrackChange?(updatedTrack)
     }
 
@@ -167,6 +210,15 @@ final class NowPlayingMonitor {
             logger.error("Now-playing script failed: \(error.description, privacy: .public)")
         }
         return descriptor.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func executeAppleScript(_ source: String, key: String) {
+        guard let script = compiledScript(source: source, key: key) else { return }
+        var error: NSDictionary?
+        _ = script.executeAndReturnError(&error)
+        if let error {
+            logger.error("Playback command failed: \(error.description, privacy: .public)")
+        }
     }
 
     private func compiledScript(source: String, key: String) -> NSAppleScript? {

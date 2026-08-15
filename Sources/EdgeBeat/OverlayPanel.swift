@@ -1,21 +1,18 @@
 import AppKit
+import CoreGraphics
 import SwiftUI
 
-/// Hosting view that reports zero safe-area insets so SwiftUI draws all the way to
-/// the true physical top edge (behind the notch / menu bar). Without this, the
-/// window's safe area pushes the canvas *below* the notch and the top glow appears
-/// under it instead of flanking it.
 private final class GlowHostingView: NSHostingView<EdgeGlowView> {
-    override var safeAreaInsets: NSEdgeInsets { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
+    override var safeAreaInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
 }
 
-/// Non-activating, borderless, click-through overlay window that hosts the glow.
-/// Floats above normal windows and full-screen apps, on every Space.
 final class OverlayPanel: NSPanel {
-    init(screen: NSScreen, settings: GlowSettings, renderState: RenderState) {
+    init(screen: NSScreen, preferences: AppPreferences, renderState: RenderState) {
         super.init(
             contentRect: screen.frame,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
             backing: .buffered,
             defer: false
         )
@@ -23,96 +20,291 @@ final class OverlayPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        ignoresMouseEvents = true            // click-through: clicks pass to apps below
-        // Keep the panel just above the screen-saver level so full-screen app
-        // surfaces cannot cover the edge while system UI remains usable.
-        level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+        ignoresMouseEvents = true
+        canBecomeVisibleWithoutLogin = true
+        isReleasedWhenClosed = false
+        level = Self.topmostLevel
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         isFloatingPanel = true
         isMovableByWindowBackground = false
         hidesOnDeactivate = false
 
-        let host = GlowHostingView(rootView: EdgeGlowView(settings: settings, renderState: renderState))
+        let view = EdgeGlowView(preferences: preferences, renderState: renderState)
+        let host = GlowHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: screen.frame.size)
         host.autoresizingMask = [.width, .height]
         contentView = host
     }
 
-    // Never steal focus — this is a passive overlay.
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    func enableLockScreenVisibility() {
+        SkyLightLockBridge.shared?.delegate(self)
+    }
+
+    func disableLockScreenVisibility() {
+        SkyLightLockBridge.shared?.undelegate(self)
+    }
+
+    static var topmostLevel: NSWindow.Level {
+        NSWindow.Level(rawValue: Int(Int32.max - 2))
+    }
 }
 
-/// Owns the overlay panel: creates it lazily, toggles visibility, drives live
-/// settings (brightness), and keeps it sized to the main display across
-/// resolution / arrangement changes.
-final class OverlayController {
-    let settings = GlowSettings()
-    private let renderState: RenderState
-    private var panel: OverlayPanel?
+private final class LockScreenCardPanel: NSPanel {
+    private static let panelHeight: CGFloat = 124
+    private static let maximumWidth: CGFloat = 430
 
-    init(renderState: RenderState) {
+    init(screen: NSScreen, renderState: RenderState,
+         onPlaybackCommand: @escaping (PlaybackCommand, PlayerSource) -> Void) {
+        let frame = Self.cardFrame(on: screen)
+        super.init(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
+            backing: .buffered,
+            defer: false
+        )
+
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        canBecomeVisibleWithoutLogin = true
+        isReleasedWhenClosed = false
+        level = OverlayPanel.topmostLevel
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        isFloatingPanel = true
+        isMovableByWindowBackground = false
+        hidesOnDeactivate = false
+        appearance = NSAppearance(named: .darkAqua)
+
+        let view = LockScreenNowPlayingView(
+            renderState: renderState,
+            onPlaybackCommand: onPlaybackCommand
+        )
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: frame.size)
+        host.autoresizingMask = [.width, .height]
+        contentView = host
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    func reposition(on screen: NSScreen) {
+        setFrame(Self.cardFrame(on: screen), display: true)
+    }
+
+    func enableLockScreenVisibility() {
+        SkyLightLockBridge.shared?.delegate(self)
+    }
+
+    func disableLockScreenVisibility() {
+        SkyLightLockBridge.shared?.undelegate(self)
+    }
+
+    private static func cardFrame(on screen: NSScreen) -> NSRect {
+        let width = min(maximumWidth, screen.frame.width - 32)
+        let x = screen.frame.midX - width / 2
+        // macOS places authentication around the vertical center. Keeping the
+        // card's bottom at 57% places it above the profile without crowding the clock.
+        let y = screen.frame.minY + screen.frame.height * 0.57
+        return NSRect(x: x, y: y, width: width, height: panelHeight)
+    }
+}
+
+final class OverlayController {
+    private let preferences: AppPreferences
+    private let renderState: RenderState
+    private let onPlaybackCommand: (PlaybackCommand, PlayerSource) -> Void
+    private var panels: [CGDirectDisplayID: OverlayPanel] = [:]
+    private var cardPanel: LockScreenCardPanel?
+    private var cardDisplayID: CGDirectDisplayID?
+    private var isVisible = false
+    private var isObserving = false
+
+    init(preferences: AppPreferences, renderState: RenderState,
+         onPlaybackCommand: @escaping (PlaybackCommand, PlayerSource) -> Void) {
+        self.preferences = preferences
         self.renderState = renderState
+        self.onPlaybackCommand = onPlaybackCommand
     }
 
     func show() {
-        if panel == nil {
-            guard let screen = NSScreen.main else { return }
-            panel = OverlayPanel(screen: screen, settings: settings, renderState: renderState)
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(screensChanged),
-                name: NSApplication.didChangeScreenParametersNotification,
-                object: nil
-            )
-            NSWorkspace.shared.notificationCenter.addObserver(
-                self,
-                selector: #selector(fullScreenChanged),
-                name: NSWorkspace.activeSpaceDidChangeNotification,
-                object: nil
-            )
-            NSWorkspace.shared.notificationCenter.addObserver(
-                self,
-                selector: #selector(fullScreenChanged),
-                name: NSWorkspace.didActivateApplicationNotification,
-                object: nil
-            )
-        }
-        reassertOverlay()
+        isVisible = true
+        beginObservingIfNeeded()
+        refreshDisplays()
     }
 
     func hide() {
-        panel?.orderOut(nil)
+        isVisible = false
+        panels.values.forEach {
+            $0.disableLockScreenVisibility()
+            $0.orderOut(nil)
+        }
+        cardPanel?.disableLockScreenVisibility()
+        cardPanel?.orderOut(nil)
     }
 
-    func setIntensity(_ value: Double) {
-        settings.intensity = value
+    func refreshDisplays() {
+        guard isVisible else { return }
+        let screens = selectedScreens()
+        let selectedIDs = Set(screens.compactMap(displayID))
+        let mainID = NSScreen.main.flatMap(displayID)
+
+        for id in Array(panels.keys) where !selectedIDs.contains(id) {
+            panels[id]?.orderOut(nil)
+            panels[id] = nil
+        }
+
+        for screen in screens {
+            guard let id = displayID(screen) else { continue }
+            let panel: OverlayPanel
+            if let existing = panels[id] {
+                panel = existing
+            } else {
+                panel = OverlayPanel(screen: screen, preferences: preferences,
+                                     renderState: renderState)
+                panels[id] = panel
+            }
+            panel.setFrame(screen.frame, display: true)
+            panel.level = OverlayPanel.topmostLevel
+            panel.orderFrontRegardless()
+            if preferences.isScreenLocked {
+                panel.enableLockScreenVisibility()
+            }
+        }
+        refreshLockScreenCard(on: NSScreen.main, displayID: mainID)
+    }
+
+    func refreshLockScreenCard() {
+        guard isVisible else { return }
+        refreshLockScreenCard(on: NSScreen.main, displayID: NSScreen.main.flatMap(displayID))
+    }
+
+    private func beginObservingIfNeeded() {
+        guard !isObserving else { return }
+        isObserving = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screensChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(fullScreenChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(fullScreenChanged),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        preferences.isScreenLocked = currentLockState()
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(screenDidLock),
+            name: Notification.Name("com.apple.screenIsLocked"),
+            object: nil
+        )
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(screenDidUnlock),
+            name: Notification.Name("com.apple.screenIsUnlocked"),
+            object: nil
+        )
     }
 
     @objc private func screensChanged() {
-        reassertOverlay()
+        refreshDisplays()
     }
 
     @objc private func fullScreenChanged() {
-        // Full-screen transitions can temporarily reorder auxiliary windows below
-        // the app's full-screen surface. Reassert the frame and level afterwards.
         for delay in [0.0, 0.2, 0.8] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.reassertOverlay()
+                self?.refreshDisplays()
             }
         }
     }
 
-    private func reassertOverlay() {
-        layoutToMainScreen()
-        panel?.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
-        panel?.orderFrontRegardless()
+    @objc private func screenDidLock() {
+        preferences.isScreenLocked = true
+        refreshDisplays()
+        panels.values.forEach { $0.enableLockScreenVisibility() }
+        refreshLockScreenCard()
     }
 
-    private func layoutToMainScreen() {
-        guard let panel, let screen = NSScreen.main else { return }
-        // Full frame (not visibleFrame) so the top edge sits at the true physical
-        // top and wraps around the notch.
-        panel.setFrame(screen.frame, display: true)
+    @objc private func screenDidUnlock() {
+        preferences.isScreenLocked = false
+        cardPanel?.orderOut(nil)
+        // Keep the delegated window alive through the unlock cross-fade to avoid
+        // a flash, then return it to the normal window spaces.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, !self.preferences.isScreenLocked else { return }
+            self.panels.values.forEach { $0.disableLockScreenVisibility() }
+            self.cardPanel?.disableLockScreenVisibility()
+        }
+    }
+
+    private func refreshLockScreenCard(on screen: NSScreen?, displayID: CGDirectDisplayID?) {
+        guard let screen, let displayID else {
+            cardPanel?.orderOut(nil)
+            return
+        }
+
+        if cardPanel == nil || cardDisplayID != displayID {
+            cardPanel?.disableLockScreenVisibility()
+            cardPanel?.orderOut(nil)
+            cardPanel = LockScreenCardPanel(
+                screen: screen,
+                renderState: renderState,
+                onPlaybackCommand: onPlaybackCommand
+            )
+            cardDisplayID = displayID
+        } else {
+            cardPanel?.reposition(on: screen)
+        }
+
+        let shouldShow = preferences.isScreenLocked
+            && preferences.nowPlayingCardEnabled
+            && renderState.track.state != .unavailable
+        guard shouldShow else {
+            cardPanel?.orderOut(nil)
+            return
+        }
+
+        cardPanel?.level = OverlayPanel.topmostLevel
+        cardPanel?.orderFrontRegardless()
+        cardPanel?.enableLockScreenVisibility()
+    }
+
+    private func currentLockState() -> Bool {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
+        return session["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
+
+    private func selectedScreens() -> [NSScreen] {
+        switch preferences.displayTarget {
+        case .builtIn:
+            if let builtIn = NSScreen.screens.first(where: { screen in
+                guard let id = displayID(screen) else { return false }
+                return CGDisplayIsBuiltin(id) != 0
+            }) {
+                return [builtIn]
+            }
+            return NSScreen.main.map { [$0] } ?? []
+        case .main:
+            return NSScreen.main.map { [$0] } ?? []
+        case .all:
+            return NSScreen.screens
+        }
+    }
+
+    private func displayID(_ screen: NSScreen) -> CGDirectDisplayID? {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        return (screen.deviceDescription[key] as? NSNumber).map { CGDirectDisplayID($0.uint32Value) }
     }
 }

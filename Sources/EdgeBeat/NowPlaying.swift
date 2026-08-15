@@ -13,6 +13,12 @@ enum PlaybackState: String {
     case unavailable
 }
 
+enum PlaybackCommand: String {
+    case previousTrack = "previous track"
+    case togglePlayPause = "playpause"
+    case nextTrack = "next track"
+}
+
 struct NowPlayingTrack: Equatable {
     let source: PlayerSource
     let title: String
@@ -22,6 +28,8 @@ struct NowPlayingTrack: Equatable {
     let identifier: String
     let state: PlaybackState
     let processID: pid_t?
+    let duration: TimeInterval
+    let position: TimeInterval
 
     static let empty = NowPlayingTrack(
         source: .automatic,
@@ -31,7 +39,9 @@ struct NowPlayingTrack: Equatable {
         artwork: nil,
         identifier: "",
         state: .unavailable,
-        processID: nil
+        processID: nil,
+        duration: 0,
+        position: 0
     )
 
     static func == (lhs: NowPlayingTrack, rhs: NowPlayingTrack) -> Bool {
@@ -47,7 +57,9 @@ struct NowPlayingTrack: Equatable {
             artwork: artwork,
             identifier: identifier,
             state: state,
-            processID: processID
+            processID: processID,
+            duration: duration,
+            position: position
         )
     }
 }
