@@ -31,7 +31,15 @@ struct EdgeGlowView: View {
         let audioLevel = renderState.isPlaying ? renderState.level * 0.88 : 0
         let beatBoost = renderState.beat ? 0.22 : 0
         let level = min(1, idleLevel + audioLevel + beatBoost) * settings.intensity
-        let shape = RoundedRectangle(cornerRadius: 34, style: .continuous).inset(by: 3)
+        // Mac displays have softened top corners while the lower edge reads more
+        // naturally as a straight rectangular boundary.
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 16,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 16,
+            style: .continuous
+        ).inset(by: 2)
         let gradient = AngularGradient(
             gradient: Gradient(colors: colors),
             center: .center,
@@ -41,9 +49,9 @@ struct EdgeGlowView: View {
         let bloom = renderState.beat ? 1.25 : 1
 
         ZStack {
-            shape.stroke(gradient, lineWidth: 22 * bloom).blur(radius: 28).opacity(0.48 * level)
-            shape.stroke(gradient, lineWidth: 10 * bloom).blur(radius: 12).opacity(0.72 * level)
-            shape.stroke(gradient, lineWidth: 2.5).blur(radius: 1.5).opacity(0.90 * level)
+            shape.strokeBorder(gradient, lineWidth: 22 * bloom).blur(radius: 28).opacity(0.48 * level)
+            shape.strokeBorder(gradient, lineWidth: 10 * bloom).blur(radius: 12).opacity(0.72 * level)
+            shape.strokeBorder(gradient, lineWidth: 2.5).blur(radius: 1.5).opacity(0.90 * level)
         }
         .drawingGroup(opaque: false, colorMode: .extendedLinear)
         .blendMode(.screen)

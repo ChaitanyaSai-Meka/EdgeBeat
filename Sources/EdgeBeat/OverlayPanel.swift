@@ -24,13 +24,16 @@ final class OverlayPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         ignoresMouseEvents = true            // click-through: clicks pass to apps below
-        level = .screenSaver                 // above normal + full-screen windows
+        // Keep the panel just above the screen-saver level so full-screen app
+        // surfaces cannot cover the edge while system UI remains usable.
+        level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         isFloatingPanel = true
         isMovableByWindowBackground = false
         hidesOnDeactivate = false
 
         let host = GlowHostingView(rootView: EdgeGlowView(settings: settings, renderState: renderState))
+        host.frame = NSRect(origin: .zero, size: screen.frame.size)
         host.autoresizingMask = [.width, .height]
         contentView = host
     }
@@ -68,9 +71,14 @@ final class OverlayController {
                 name: NSWorkspace.activeSpaceDidChangeNotification,
                 object: nil
             )
+            NSWorkspace.shared.notificationCenter.addObserver(
+                self,
+                selector: #selector(fullScreenChanged),
+                name: NSWorkspace.didActivateApplicationNotification,
+                object: nil
+            )
         }
-        layoutToMainScreen()
-        panel?.orderFrontRegardless()        // show without activating the app
+        reassertOverlay()
     }
 
     func hide() {
@@ -82,17 +90,23 @@ final class OverlayController {
     }
 
     @objc private func screensChanged() {
-        layoutToMainScreen()
-        panel?.orderFrontRegardless()
+        reassertOverlay()
     }
 
     @objc private func fullScreenChanged() {
         // Full-screen transitions can temporarily reorder auxiliary windows below
         // the app's full-screen surface. Reassert the frame and level afterwards.
-        DispatchQueue.main.async { [weak self] in
-            self?.layoutToMainScreen()
-            self?.panel?.orderFrontRegardless()
+        for delay in [0.0, 0.2, 0.8] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.reassertOverlay()
+            }
         }
+    }
+
+    private func reassertOverlay() {
+        layoutToMainScreen()
+        panel?.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+        panel?.orderFrontRegardless()
     }
 
     private func layoutToMainScreen() {
