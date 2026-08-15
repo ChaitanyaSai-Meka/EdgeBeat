@@ -37,12 +37,16 @@ struct EdgeGlowView: View {
     @ViewBuilder
     private var edgeEffect: some View {
         if preferences.animationMode == .ambient {
-            TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+            TimelineView(.periodic(from: .now, by: ambientFrameInterval)) { timeline in
                 glow(time: timeline.date.timeIntervalSinceReferenceDate)
             }
         } else {
             glow(time: nil)
         }
+    }
+
+    private var ambientFrameInterval: TimeInterval {
+        1.0 / (renderState.isLowPowerModeEnabled ? 12.0 : 18.0)
     }
 
     private func glow(time: TimeInterval?) -> some View {
@@ -113,8 +117,8 @@ struct EdgeGlowView: View {
     }
 
     private func ambientWaveform(at time: TimeInterval) -> [Double] {
-        (0..<192).map { index in
-            let position = Double(index) / 191
+        (0..<128).map { index in
+            let position = Double(index) / 127
             let broad = sin(position * .pi * 10 + time * 0.72)
             let detail = sin(position * .pi * 26 - time * 0.43)
             return min(1, max(0, 0.48 + broad * 0.22 + detail * 0.1))

@@ -19,8 +19,8 @@ final class AudioTapEngine {
     var onStatusChange: ((String?) -> Void)?
 
     private let logger = Logger(subsystem: "com.chaitanya.edgebeat", category: "audio")
-    private let controlQueue = DispatchQueue(label: "com.chaitanya.edgebeat.audio-control", qos: .userInitiated)
-    private let ioQueue = DispatchQueue(label: "com.chaitanya.edgebeat.audio-io", qos: .userInteractive)
+    private let controlQueue = DispatchQueue(label: "com.chaitanya.edgebeat.audio-control", qos: .utility)
+    private let ioQueue = DispatchQueue(label: "com.chaitanya.edgebeat.audio-io", qos: .userInitiated)
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
@@ -28,6 +28,8 @@ final class AudioTapEngine {
     private var activeProcessID: pid_t?
     private var hasReceivedSamples = false
     private var hasReportedEmptyBuffer = false
+    private var pendingSamples: [Float] = []
+    private let sampleDeliverySize = 2048
 
     func start(processID: pid_t?) {
         controlQueue.async { [weak self] in
@@ -87,6 +89,7 @@ final class AudioTapEngine {
         activeProcessID = nil
         hasReceivedSamples = false
         hasReportedEmptyBuffer = false
+        pendingSamples.removeAll(keepingCapacity: true)
     }
 
     private func createTap(processID: pid_t?) throws {
@@ -139,7 +142,12 @@ final class AudioTapEngine {
                 self.logger.notice("Receiving audio samples")
                 self.onStatusChange?("Audio capture active")
             }
-            self.onSamples?(samples, sampleRate)
+            self.pendingSamples.append(contentsOf: samples)
+            guard self.pendingSamples.count >= self.sampleDeliverySize else { return }
+            var batch: [Float] = []
+            swap(&batch, &self.pendingSamples)
+            self.pendingSamples.reserveCapacity(self.sampleDeliverySize)
+            self.onSamples?(batch, sampleRate)
         }
         try check(status, "Create audio IO callback")
         ioProcID = createdIOProc

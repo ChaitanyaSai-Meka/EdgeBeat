@@ -18,15 +18,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updateChecker = GitHubUpdateChecker()
     private var menuBar: MenuBarController?
     private var currentTrack = NowPlayingTrack.empty
+    private var isAudioCaptureRequested = false
+    private var requestedAudioProcessID: pid_t?
+    private var areDisplaysAsleep = false
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenuBar()
         configurePlaybackPipeline()
-        observePreferences()
-
-        if preferences.enabled { overlay.show() }
         nowPlaying.setSource(preferences.playerSource)
+        observePreferences()
+        applyPowerPolicy()
+
         nowPlaying.start()
     }
 
@@ -105,20 +108,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .sink { [weak self] _ in self?.overlay.refreshLockScreenCard() }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)
+            .sink { [weak self] _ in self?.applyPowerPolicy() }
+            .store(in: &cancellables)
+
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.screensDidSleepNotification)
+            .sink { [weak self] _ in self?.setDisplaysAsleep(true) }
+            .store(in: &cancellables)
+
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.screensDidWakeNotification)
+            .sink { [weak self] _ in self?.setDisplaysAsleep(false) }
+            .store(in: &cancellables)
     }
 
     private func syncAudioCapture() {
         let shouldCapture = preferences.enabled
             && preferences.animationMode == .musicSync
             && currentTrack.state == .playing
+            && !areDisplaysAsleep
 
         if shouldCapture {
+            guard !isAudioCaptureRequested
+                    || requestedAudioProcessID != currentTrack.processID else { return }
+            isAudioCaptureRequested = true
+            requestedAudioProcessID = currentTrack.processID
             audioTap.start(processID: currentTrack.processID)
         } else {
+            guard isAudioCaptureRequested else { return }
+            isAudioCaptureRequested = false
+            requestedAudioProcessID = nil
             audioTap.stop()
             renderState.update(audio: .silence)
             menuBar?.setCaptureStatus(nil)
         }
+    }
+
+    private func applyPowerPolicy() {
+        let isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+        renderState.setLowPowerMode(isLowPowerModeEnabled)
+        beatAnalyzer?.setLowPowerMode(isLowPowerModeEnabled)
+        nowPlaying.setLowPowerMode(isLowPowerModeEnabled)
+    }
+
+    private func setDisplaysAsleep(_ asleep: Bool) {
+        guard areDisplaysAsleep != asleep else { return }
+        areDisplaysAsleep = asleep
+        if asleep {
+            nowPlaying.stop()
+            overlay.hide()
+        } else {
+            nowPlaying.start()
+            if preferences.enabled {
+                overlay.show()
+            }
+        }
+        syncAudioCapture()
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) -> Bool {

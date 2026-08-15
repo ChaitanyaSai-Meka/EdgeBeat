@@ -15,8 +15,8 @@ struct AudioFeatures {
 final class BeatAnalyzer {
     var onFeatures: ((AudioFeatures) -> Void)?
 
-    private let analysisQueue = DispatchQueue(label: "com.chaitanya.edgebeat.analysis", qos: .userInitiated)
-    private let fftSize = 1024
+    private let analysisQueue = DispatchQueue(label: "com.chaitanya.edgebeat.analysis", qos: .utility)
+    private let fftSize = 2048
     private let log2Size: vDSP_Length
     private let fftSetup: FFTSetup
     private var window: [Float]
@@ -24,8 +24,9 @@ final class BeatAnalyzer {
     private var smoothedLevel = 0.0
     private var bassHistory: [Double] = []
     private var lastBeatTime = 0.0
-    private var lastPublishTime = 0.0
-    private var previousWaveform = [Double](repeating: 0, count: 192)
+    private var lastAnalysisTime = 0.0
+    private var minimumAnalysisInterval = 1.0 / 20.0
+    private var previousWaveform = [Double](repeating: 0, count: 128)
 
     init?() {
         log2Size = vDSP_Length(log2(Float(fftSize)))
@@ -33,6 +34,7 @@ final class BeatAnalyzer {
         fftSetup = setup
         window = [Float](repeating: 0, count: fftSize)
         vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+        pendingSamples.reserveCapacity(fftSize * 2)
     }
 
     deinit {
@@ -45,16 +47,30 @@ final class BeatAnalyzer {
         }
     }
 
-    private func consumeOnAnalysisQueue(samples: [Float], sampleRate: Double) {
-        pendingSamples.append(contentsOf: samples)
-        while pendingSamples.count >= fftSize {
-            let frame = Array(pendingSamples.prefix(fftSize))
-            pendingSamples.removeFirst(fftSize)
-            analyze(frame, sampleRate: sampleRate)
+    func setLowPowerMode(_ enabled: Bool) {
+        analysisQueue.async { [weak self] in
+            self?.minimumAnalysisInterval = 1.0 / (enabled ? 15.0 : 20.0)
         }
     }
 
-    private func analyze(_ samples: [Float], sampleRate: Double) {
+    private func consumeOnAnalysisQueue(samples: [Float], sampleRate: Double) {
+        pendingSamples.append(contentsOf: samples)
+        let maximumBufferedSamples = fftSize * 2
+        if pendingSamples.count > maximumBufferedSamples {
+            pendingSamples.removeFirst(pendingSamples.count - maximumBufferedSamples)
+        }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        guard pendingSamples.count >= fftSize,
+              now - lastAnalysisTime >= minimumAnalysisInterval else { return }
+
+        let frame = Array(pendingSamples.suffix(fftSize))
+        pendingSamples.removeAll(keepingCapacity: true)
+        lastAnalysisTime = now
+        analyze(frame, sampleRate: sampleRate, now: now)
+    }
+
+    private func analyze(_ samples: [Float], sampleRate: Double, now: TimeInterval) {
         var windowed = [Float](repeating: 0, count: fftSize)
         vDSP_vmul(samples, 1, window, 1, &windowed, 1, vDSP_Length(fftSize))
 
@@ -92,12 +108,9 @@ final class BeatAnalyzer {
         bassHistory.append(bass)
         if bassHistory.count > 32 { bassHistory.removeFirst() }
         let baseline = bassHistory.isEmpty ? 0 : bassHistory.reduce(0, +) / Double(bassHistory.count)
-        let now = ProcessInfo.processInfo.systemUptime
         let isBeat = bass > baseline * 1.5 && bass > 0.012 && now - lastBeatTime > 0.22
         if isBeat { lastBeatTime = now }
 
-        guard isBeat || now - lastPublishTime >= 1.0 / 24.0 else { return }
-        lastPublishTime = now
         let features = AudioFeatures(
             level: smoothedLevel,
             bass: normalizeBand(bass),

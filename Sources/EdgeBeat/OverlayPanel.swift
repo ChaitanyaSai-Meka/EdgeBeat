@@ -12,10 +12,12 @@ final class OverlayPanel: NSPanel {
     private let preferences: AppPreferences
     private let renderState: RenderState
     private var glowHost: GlowHostingView?
+    private var displayNotch: DisplayNotch?
 
     init(screen: NSScreen, preferences: AppPreferences, renderState: RenderState) {
         self.preferences = preferences
         self.renderState = renderState
+        displayNotch = DisplayNotch(screen: screen)
         super.init(
             contentRect: screen.frame,
             styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
@@ -36,7 +38,7 @@ final class OverlayPanel: NSPanel {
         hidesOnDeactivate = false
 
         let view = EdgeGlowView(preferences: preferences, renderState: renderState,
-                                notch: DisplayNotch(screen: screen))
+                                notch: displayNotch)
         let host = GlowHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: screen.frame.size)
         host.autoresizingMask = [.width, .height]
@@ -48,11 +50,16 @@ final class OverlayPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     func updateDisplay(_ screen: NSScreen) {
-        setFrame(screen.frame, display: true)
+        if frame != screen.frame {
+            setFrame(screen.frame, display: true)
+        }
+        let updatedNotch = DisplayNotch(screen: screen)
+        guard displayNotch != updatedNotch else { return }
+        displayNotch = updatedNotch
         glowHost?.rootView = EdgeGlowView(
             preferences: preferences,
             renderState: renderState,
-            notch: DisplayNotch(screen: screen)
+            notch: updatedNotch
         )
     }
 
@@ -161,6 +168,9 @@ final class OverlayController {
         }
         cardPanel?.disableLockScreenVisibility()
         cardPanel?.orderOut(nil)
+        panels.removeAll()
+        cardPanel = nil
+        cardDisplayID = nil
     }
 
     func refreshDisplays() {
@@ -267,6 +277,14 @@ final class OverlayController {
     }
 
     private func refreshLockScreenCard(on screen: NSScreen?, displayID: CGDirectDisplayID?) {
+        let shouldShow = preferences.isScreenLocked
+            && preferences.nowPlayingCardEnabled
+            && renderState.track.state != .unavailable
+        guard shouldShow else {
+            cardPanel?.orderOut(nil)
+            return
+        }
+
         guard let screen, let displayID else {
             cardPanel?.orderOut(nil)
             return
@@ -283,14 +301,6 @@ final class OverlayController {
             cardDisplayID = displayID
         } else {
             cardPanel?.reposition(on: screen)
-        }
-
-        let shouldShow = preferences.isScreenLocked
-            && preferences.nowPlayingCardEnabled
-            && renderState.track.state != .unavailable
-        guard shouldShow else {
-            cardPanel?.orderOut(nil)
-            return
         }
 
         cardPanel?.level = OverlayPanel.topmostLevel

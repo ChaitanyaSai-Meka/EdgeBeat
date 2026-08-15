@@ -14,6 +14,7 @@ final class NowPlayingMonitor {
     private var artworkCache: [String: NSImage] = [:]
     private var compiledScripts: [String: NSAppleScript] = [:]
     private var isPolling = false
+    private var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
     private var spotifyPlaybackObserver: NSObjectProtocol?
     private let mediaRemote = MediaRemoteAdapter()
     private let pollQueue = DispatchQueue(label: "com.chaitanya.edgebeat.now-playing", qos: .utility)
@@ -46,6 +47,10 @@ final class NowPlayingMonitor {
         guard self.source != source else { return }
         self.source = source
         if isRunning { requestImmediatePoll() }
+    }
+
+    func setLowPowerMode(_ enabled: Bool) {
+        isLowPowerModeEnabled = enabled
     }
 
     func perform(_ command: PlaybackCommand, for source: PlayerSource) {
@@ -94,12 +99,7 @@ final class NowPlayingMonitor {
                     self.lastTrack = resolvedTrack
                     self.loadArtwork(for: track)
                 }
-                let delay: TimeInterval = switch resolvedTrack.state {
-                case .playing: 1.5
-                case .paused: 3
-                case .stopped, .unavailable: 5
-                }
-                self.scheduleNextPoll(after: delay)
+                self.scheduleNextPoll(after: self.pollInterval(for: resolvedTrack.state))
             }
         }
     }
@@ -109,6 +109,22 @@ final class NowPlayingMonitor {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             self?.pollNow()
+        }
+        timer?.tolerance = delay < 1 ? 0.05 : min(2, max(0.2, delay * 0.2))
+    }
+
+    private func pollInterval(for state: PlaybackState) -> TimeInterval {
+        if isLowPowerModeEnabled {
+            return switch state {
+            case .playing: 3
+            case .paused: 8
+            case .stopped, .unavailable: 20
+            }
+        }
+        return switch state {
+        case .playing: 2
+        case .paused: 5
+        case .stopped, .unavailable: 10
         }
     }
 

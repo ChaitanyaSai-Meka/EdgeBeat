@@ -23,6 +23,7 @@ Current version: `1.0.0`
 - Full-screen app and multi-Space support
 - Lock-screen artwork, progress, and playback controls
 - Persistent settings and optional Launch at Login
+- Adaptive refresh rates that respect macOS Low Power Mode and display sleep
 - Menu-bar-only operation with no Dock icon
 
 ## Requirements

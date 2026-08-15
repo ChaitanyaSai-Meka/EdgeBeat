@@ -10,6 +10,7 @@ final class RenderState: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var trackTitle = ""
     @Published private(set) var trackArtist = ""
+    @Published private(set) var isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     private var beatResetWork: DispatchWorkItem?
     private var paletteTrackIdentifier = ""
@@ -47,6 +48,12 @@ final class RenderState: ObservableObject {
             let work = DispatchWorkItem { [weak self] in self?.beat = false }
             beatResetWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: work)
+        }
+    }
+
+    func setLowPowerMode(_ enabled: Bool) {
+        if isLowPowerModeEnabled != enabled {
+            isLowPowerModeEnabled = enabled
         }
     }
 }
