@@ -1,8 +1,32 @@
+import AppKit
 import SwiftUI
+
+struct DisplayNotch: Equatable {
+    let minX: CGFloat
+    let maxX: CGFloat
+    let depth: CGFloat
+    let cornerRadius: CGFloat
+
+    init?(screen: NSScreen) {
+        guard screen.safeAreaInsets.top > 0,
+              let leftArea = screen.auxiliaryTopLeftArea,
+              let rightArea = screen.auxiliaryTopRightArea else { return nil }
+
+        let minX = leftArea.maxX - screen.frame.minX
+        let maxX = rightArea.minX - screen.frame.minX
+        guard maxX > minX else { return nil }
+
+        depth = screen.safeAreaInsets.top
+        self.minX = minX
+        self.maxX = maxX
+        cornerRadius = min(10, depth * 0.32, (maxX - minX) * 0.12)
+    }
+}
 
 struct EdgeGlowView: View {
     @ObservedObject var preferences: AppPreferences
     @ObservedObject var renderState: RenderState
+    let notch: DisplayNotch?
 
     var body: some View {
         edgeEffect
@@ -54,16 +78,19 @@ struct EdgeGlowView: View {
         let colors = activeColors
 
         return Canvas(opaque: false, colorMode: .extendedLinear, rendersAsynchronously: true) { context, size in
-            let fields = edgeFields(in: size)
-            drawWaveBand(context: &context, fields: fields, waveform: waveform, colors: colors,
+            let fields = sideEdgeFields(in: size)
+            drawWaveBand(context: &context, size: size, fields: fields,
+                         waveform: waveform, colors: colors,
                          baseDepth: 15 * thicknessScale * beatBloom,
                          waveDepth: waveDepth * 1.2 * thicknessScale,
                          blur: 20 * thicknessScale, opacity: 0.36 * opacity)
-            drawWaveBand(context: &context, fields: fields, waveform: waveform, colors: colors,
+            drawWaveBand(context: &context, size: size, fields: fields,
+                         waveform: waveform, colors: colors,
                          baseDepth: 7 * thicknessScale * beatBloom,
                          waveDepth: waveDepth * 0.72 * thicknessScale,
                          blur: 7 * thicknessScale, opacity: 0.62 * opacity)
-            drawWaveBand(context: &context, fields: fields, waveform: waveform, colors: colors,
+            drawWaveBand(context: &context, size: size, fields: fields,
+                         waveform: waveform, colors: colors,
                          baseDepth: max(1, 2.2 * thicknessScale),
                          waveDepth: waveDepth * 0.24 * thicknessScale,
                          blur: max(0.6, 1.2 * thicknessScale), opacity: 0.94 * opacity)
@@ -109,11 +136,9 @@ struct EdgeGlowView: View {
         let colorOffset: Int
     }
 
-    private func edgeFields(in size: CGSize) -> [EdgeField] {
+    private func sideEdgeFields(in size: CGSize) -> [EdgeField] {
         guard size.width > 0, size.height > 0 else { return [] }
         return [
-            EdgeField(edge: .top, start: .zero, end: CGPoint(x: size.width, y: 0),
-                      waveformRange: 0.0...0.3, colorOffset: 0),
             EdgeField(edge: .right, start: CGPoint(x: size.width, y: 0),
                       end: CGPoint(x: size.width, y: size.height),
                       waveformRange: 0.3...0.5, colorOffset: 1),
@@ -125,13 +150,20 @@ struct EdgeGlowView: View {
         ]
     }
 
-    private func drawWaveBand(context: inout GraphicsContext, fields: [EdgeField],
+    private func drawWaveBand(context: inout GraphicsContext, size: CGSize, fields: [EdgeField],
                               waveform: [Double], colors: [Color], baseDepth: CGFloat,
                               waveDepth: CGFloat, blur: CGFloat, opacity: Double) {
         guard !colors.isEmpty else { return }
         context.drawLayer { layer in
             layer.opacity = opacity
             if blur > 0 { layer.addFilter(.blur(radius: blur)) }
+            layer.fill(topWaveBandPath(in: size, waveform: waveform,
+                                       baseDepth: baseDepth, waveDepth: waveDepth),
+                       with: .linearGradient(
+                        Gradient(colors: [colors[0], colors[min(1, colors.count - 1)]]),
+                        startPoint: .zero,
+                        endPoint: CGPoint(x: size.width, y: 0)
+                       ))
             for field in fields {
                 let path = waveBandPath(for: field, waveform: waveform,
                                         baseDepth: baseDepth, waveDepth: waveDepth)
@@ -142,6 +174,107 @@ struct EdgeGlowView: View {
                     endPoint: field.end
                 ))
             }
+        }
+    }
+
+    private struct BoundarySample {
+        let point: CGPoint
+        let normal: CGVector
+    }
+
+    private func topWaveBandPath(in size: CGSize, waveform: [Double],
+                                 baseDepth: CGFloat, waveDepth: CGFloat) -> Path {
+        let samples = topBoundarySamples(in: size)
+        guard samples.count > 1 else { return Path() }
+
+        return Path { path in
+            path.move(to: samples[0].point)
+            for sample in samples.dropFirst() { path.addLine(to: sample.point) }
+
+            for (index, sample) in samples.enumerated().reversed() {
+                let t = CGFloat(index) / CGFloat(samples.count - 1)
+                let waveformPosition = Double(t) * 0.3
+                let amplitude = CGFloat(waveformValue(waveform, at: waveformPosition))
+                let depth = (baseDepth + waveDepth * amplitude)
+                    * cornerFalloff(for: .top, at: t)
+                path.addLine(to: CGPoint(
+                    x: sample.point.x + sample.normal.dx * depth,
+                    y: sample.point.y + sample.normal.dy * depth
+                ))
+            }
+            path.closeSubpath()
+        }
+    }
+
+    private func topBoundarySamples(in size: CGSize) -> [BoundarySample] {
+        guard let notch,
+              notch.minX > 0,
+              notch.maxX < size.width,
+              notch.depth > 0 else {
+            return lineSamples(from: .zero, to: CGPoint(x: size.width, y: 0),
+                               normal: CGVector(dx: 0, dy: 1))
+        }
+
+        let left = min(size.width, max(0, notch.minX))
+        let right = min(size.width, max(left, notch.maxX))
+        let bottom = min(size.height, max(0, notch.depth))
+        let radius = min(notch.cornerRadius, bottom, (right - left) / 2)
+        var samples: [BoundarySample] = []
+
+        appendLine(to: &samples, from: .zero, to: CGPoint(x: left, y: 0),
+                   normal: CGVector(dx: 0, dy: 1))
+        appendLine(to: &samples, from: CGPoint(x: left, y: 0),
+                   to: CGPoint(x: left, y: bottom - radius),
+                   normal: CGVector(dx: -1, dy: 0))
+        appendArc(to: &samples, center: CGPoint(x: left + radius, y: bottom - radius),
+                  radius: radius, startAngle: .pi, endAngle: .pi / 2)
+        appendLine(to: &samples, from: CGPoint(x: left + radius, y: bottom),
+                   to: CGPoint(x: right - radius, y: bottom),
+                   normal: CGVector(dx: 0, dy: 1))
+        appendArc(to: &samples, center: CGPoint(x: right - radius, y: bottom - radius),
+                  radius: radius, startAngle: .pi / 2, endAngle: 0)
+        appendLine(to: &samples, from: CGPoint(x: right, y: bottom - radius),
+                   to: CGPoint(x: right, y: 0), normal: CGVector(dx: 1, dy: 0))
+        appendLine(to: &samples, from: CGPoint(x: right, y: 0),
+                   to: CGPoint(x: size.width, y: 0), normal: CGVector(dx: 0, dy: 1))
+        return samples
+    }
+
+    private func lineSamples(from start: CGPoint, to end: CGPoint,
+                             normal: CGVector) -> [BoundarySample] {
+        var samples: [BoundarySample] = []
+        appendLine(to: &samples, from: start, to: end, normal: normal)
+        return samples
+    }
+
+    private func appendLine(to samples: inout [BoundarySample], from start: CGPoint,
+                            to end: CGPoint, normal: CGVector) {
+        let length = hypot(end.x - start.x, end.y - start.y)
+        let count = max(1, Int(length / 5))
+        for index in 0...count {
+            if !samples.isEmpty, index == 0 { continue }
+            let t = CGFloat(index) / CGFloat(count)
+            samples.append(BoundarySample(
+                point: CGPoint(x: start.x + (end.x - start.x) * t,
+                               y: start.y + (end.y - start.y) * t),
+                normal: normal
+            ))
+        }
+    }
+
+    private func appendArc(to samples: inout [BoundarySample], center: CGPoint,
+                           radius: CGFloat, startAngle: CGFloat, endAngle: CGFloat) {
+        guard radius > 0 else { return }
+        let count = max(4, Int(radius * abs(endAngle - startAngle) / 3))
+        for index in 1...count {
+            let t = CGFloat(index) / CGFloat(count)
+            let angle = startAngle + (endAngle - startAngle) * t
+            let normal = CGVector(dx: cos(angle), dy: sin(angle))
+            samples.append(BoundarySample(
+                point: CGPoint(x: center.x + normal.dx * radius,
+                               y: center.y + normal.dy * radius),
+                normal: normal
+            ))
         }
     }
 

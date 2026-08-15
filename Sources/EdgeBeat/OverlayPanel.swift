@@ -9,7 +9,13 @@ private final class GlowHostingView: NSHostingView<EdgeGlowView> {
 }
 
 final class OverlayPanel: NSPanel {
+    private let preferences: AppPreferences
+    private let renderState: RenderState
+    private var glowHost: GlowHostingView?
+
     init(screen: NSScreen, preferences: AppPreferences, renderState: RenderState) {
+        self.preferences = preferences
+        self.renderState = renderState
         super.init(
             contentRect: screen.frame,
             styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
@@ -29,15 +35,26 @@ final class OverlayPanel: NSPanel {
         isMovableByWindowBackground = false
         hidesOnDeactivate = false
 
-        let view = EdgeGlowView(preferences: preferences, renderState: renderState)
+        let view = EdgeGlowView(preferences: preferences, renderState: renderState,
+                                notch: DisplayNotch(screen: screen))
         let host = GlowHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: screen.frame.size)
         host.autoresizingMask = [.width, .height]
         contentView = host
+        glowHost = host
     }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    func updateDisplay(_ screen: NSScreen) {
+        setFrame(screen.frame, display: true)
+        glowHost?.rootView = EdgeGlowView(
+            preferences: preferences,
+            renderState: renderState,
+            notch: DisplayNotch(screen: screen)
+        )
+    }
 
     func enableLockScreenVisibility() {
         SkyLightLockBridge.shared?.delegate(self)
@@ -167,7 +184,7 @@ final class OverlayController {
                                      renderState: renderState)
                 panels[id] = panel
             }
-            panel.setFrame(screen.frame, display: true)
+            panel.updateDisplay(screen)
             panel.level = OverlayPanel.topmostLevel
             panel.orderFrontRegardless()
             if preferences.isScreenLocked {
