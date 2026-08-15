@@ -18,11 +18,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var selectedSource: PlayerSource
     private var cardItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
+    private var checkForUpdatesItem: NSMenuItem!
 
     var onQuit: (() -> Void)?
     var onSourceChange: ((PlayerSource) -> Void)?
     var onOpenPermissions: (() -> Void)?
     var onLaunchAtLoginChange: ((Bool) -> Bool)?
+    var onCheckForUpdates: (() -> Void)?
 
     init(preferences: AppPreferences) {
         self.preferences = preferences
@@ -76,6 +78,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         launchAtLoginItem = commandItem("Launch at Login", action: #selector(toggleLaunchAtLogin(_:)))
         menu.addItem(launchAtLoginItem)
         menu.addItem(commandItem("Open Privacy Settings...", action: #selector(openPermissions)))
+        checkForUpdatesItem = commandItem("Check for Updates...", action: #selector(checkForUpdates))
+        menu.addItem(checkForUpdatesItem)
         let quit = commandItem("Quit EdgeBeat", action: #selector(quitTapped))
         quit.keyEquivalent = "q"
         menu.addItem(quit)
@@ -292,6 +296,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         onOpenPermissions?()
     }
 
+    @objc private func checkForUpdates() {
+        onCheckForUpdates?()
+    }
+
     @objc private func quitTapped() {
         onQuit?()
     }
@@ -328,5 +336,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func setLaunchAtLogin(_ enabled: Bool) {
         launchAtLoginItem?.state = enabled ? .on : .off
+    }
+
+    func setCheckingForUpdates(_ checking: Bool) {
+        checkForUpdatesItem?.title = checking ? "Checking for Updates..." : "Check for Updates..."
+        checkForUpdatesItem?.isEnabled = !checking
     }
 }

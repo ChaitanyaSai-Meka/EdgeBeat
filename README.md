@@ -154,6 +154,7 @@ All controls are available from the waveform icon in the menu bar.
 | Music Source | Selects automatic detection, Spotify, or Apple Music |
 | Launch at Login | Starts EdgeBeat when the user signs in |
 | Open Privacy Settings | Opens the macOS privacy settings used by the app |
+| Check for Updates | Checks the EdgeBeat GitHub Releases page for a newer version |
 
 The lock-screen card includes artwork, title, album information, progress, and
 previous, play/pause, and next controls. It is placed above the authentication
@@ -161,7 +162,12 @@ area and is shown only on the main display.
 
 ## Updating
 
-From the repository directory:
+Select `Check for Updates...` from the EdgeBeat menu. The app checks only the
+official [EdgeBeat GitHub Releases](https://github.com/ChaitanyaSai-Meka/EdgeBeat/releases)
+feed. When a newer version is available, EdgeBeat offers to open its release page.
+
+To update directly from source instead, run the following commands from the
+repository directory:
 
 ```sh
 git pull --ff-only

@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let nowPlaying = NowPlayingMonitor()
     private let audioTap = AudioTapEngine()
     private let beatAnalyzer: BeatAnalyzer? = BeatAnalyzer()
+    private let updateChecker = GitHubUpdateChecker()
     private var menuBar: MenuBarController?
     private var currentTrack = NowPlayingTrack.empty
     private var cancellables: Set<AnyCancellable> = []
@@ -48,6 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menuBar.onLaunchAtLoginChange = { [weak self] enabled in
             self?.setLaunchAtLogin(enabled) ?? false
+        }
+        menuBar.onCheckForUpdates = { [weak self] in
+            self?.checkForUpdates()
         }
         menuBar.setLaunchAtLogin(SMAppService.mainApp.status == .enabled)
         self.menuBar = menuBar
@@ -132,5 +136,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
         return SMAppService.mainApp.status == .enabled
+    }
+
+    private func checkForUpdates() {
+        menuBar?.setCheckingForUpdates(true)
+        updateChecker.check { [weak self] result in
+            guard let self else { return }
+            menuBar?.setCheckingForUpdates(false)
+
+            let alert = NSAlert()
+            switch result {
+            case let .updateAvailable(currentVersion, release):
+                alert.messageText = "EdgeBeat \(release.version) is available"
+                alert.informativeText = "You are currently using EdgeBeat \(currentVersion)."
+                alert.addButton(withTitle: "View Release")
+                alert.addButton(withTitle: "Not Now")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    NSWorkspace.shared.open(release.pageURL)
+                }
+            case let .upToDate(currentVersion):
+                alert.messageText = "EdgeBeat is up to date"
+                alert.informativeText = "Version \(currentVersion) is the latest available release."
+                alert.runModal()
+            case let .failed(message):
+                alert.messageText = "Unable to check for updates"
+                alert.informativeText = message
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+        }
     }
 }
