@@ -1,202 +1,355 @@
 # EdgeBeat
 
-**Music-reactive ambient edge lighting for macOS.** EdgeBeat turns your screen's
-edges into a sleek glowing border that **pulses to the beat** of whatever's playing in
-**Spotify** or **Apple Music** and is **colored by the album art** — a "music player
-edge lighting" effect, like phone edge-lighting / ambilight.
+EdgeBeat is a music-reactive edge-lighting application for macOS. It renders a
+click-through glow around the display, follows the current album artwork, and
+responds to audio from Spotify or Apple Music.
 
-It lives quietly in the menu bar (no Dock icon) and floats a click-through glow over
-everything, including full-screen apps and across all Spaces.
+The application runs from the menu bar, stays visible over full-screen apps,
+supports multiple displays, follows the physical MacBook notch, and can show an
+interactive now-playing card on the lock screen.
 
----
+## Features
 
-## Status
-
-| Milestone | Feature | State |
-|-----------|---------|-------|
-| 1 | Menu-bar app scaffold + build scripts | ✅ Done |
-| 2 | Overlay panel + edge glow rendering | ✅ Done |
-| 3 | Now-playing + album-art color palette | ✅ Done |
-| 4 | Audio capture + beat detection | ✅ Done |
-| 5 | Polish: preferences, displays, card, permissions, signing | ✅ Done |
-
-> The current build includes music-synced, ambient, and static animation modes; album or
-> custom colors; single/gradient rendering; glow and thickness controls; persistent
-> settings; multi-display targeting; an optional lock-screen now-playing card; and
-> Launch at Login.
-
----
+- Music-reactive edge waves driven by real system audio
+- Spotify and Apple Music detection
+- Album-art color extraction
+- Custom single-color and gradient modes
+- Music Sync, Ambient, and Static animation modes
+- Adjustable glow intensity and thickness
+- Built-in, main, or all-display targeting
+- Notch-aware lighting on supported MacBook displays
+- Full-screen app and multi-Space support
+- Lock-screen artwork, progress, and playback controls
+- Persistent settings and optional Launch at Login
+- Menu-bar-only operation with no Dock icon
 
 ## Requirements
 
-- **macOS 14.4+** (developed/tested on macOS 26, Apple Silicon)
-- **Swift toolchain** — Xcode **Command Line Tools** are enough (no full Xcode needed):
-  ```sh
-  xcode-select --install
-  ```
-- Spotify and/or the Apple Music app for the now-playing/color features.
+- macOS 14.4 or later
+- Xcode Command Line Tools
+- Spotify for macOS, Apple Music, or both
+- A Mac account allowed to grant system-audio permissions
 
----
+The project is primarily developed and verified on Apple Silicon. The bundled
+MediaRemoteAdapter framework includes both Apple Silicon and Intel architectures.
 
-## Build & Run
+## Installation
+
+EdgeBeat is currently distributed as source code. Build the application locally
+using the included script.
+
+### 1. Install the Command Line Tools
+
+Open Terminal and run:
 
 ```sh
-# from the project root (this folder)
-bash scripts/build.sh     # compiles + assembles EdgeBeat.app + signs it
-open EdgeBeat.app          # launch (menu-bar icon appears; no Dock icon)
+xcode-select --install
+```
 
-# or do both at once:
+If the tools are already installed, macOS will report that no installation is
+necessary.
+
+### 2. Clone the repository
+
+```sh
+git clone https://github.com/ChaitanyaSai-Meka/EdgeBeat.git
+cd EdgeBeat
+```
+
+### 3. Build EdgeBeat
+
+```sh
+bash scripts/build.sh
+```
+
+The script performs a release build, assembles `EdgeBeat.app`, copies the required
+resources, and applies an ad-hoc code signature.
+
+### 4. Launch EdgeBeat
+
+```sh
+open EdgeBeat.app
+```
+
+EdgeBeat runs as a menu-bar application. A waveform icon will appear in the menu
+bar; no Dock icon is shown.
+
+You can build and launch in one command during development:
+
+```sh
 bash scripts/run.sh
 ```
 
-A waveform icon appears in the menu bar. It provides immediate access to the lighting
-toggle, animation mode, album/custom colors, glow, thickness, display targeting, the
-lock-screen now-playing card, music source, Launch at Login, privacy settings, and quit.
+### 5. Install in Applications
 
-To stop it from the terminal:
+After building, the app can be placed in `/Applications`:
 
 ```sh
-pkill -x EdgeBeat
+ditto EdgeBeat.app /Applications/EdgeBeat.app
+open /Applications/EdgeBeat.app
 ```
 
----
+When replacing an existing installation, quit EdgeBeat before copying the new
+build.
+
+## First Run
+
+1. Start Spotify or Apple Music and play a track.
+2. Open the EdgeBeat menu-bar menu.
+3. Enable `Lighting`.
+4. Set `Animation` to `Music Sync`.
+5. Set `Music Source` to `Automatic`, `Spotify`, or `Apple Music`.
+6. Approve the system-audio permission if macOS requests it.
+
+Album colors and audio response may take a few seconds to appear after the first
+track begins playing.
 
 ## Permissions
 
-EdgeBeat asks for the minimum it needs, on first use:
+### System Audio
 
-- **Now Playing / Automation** — the bundled MediaRemoteAdapter is the primary path for
-  Spotify and Apple Music, so metadata and playback controls do not depend on per-app
-  Automation approval. AppleScript remains as a fallback for metadata and artwork.
-- **Audio capture** — EdgeBeat uses **Core Audio process
-  taps**, which capture the music app's audio **without** Screen Recording permission and
-  without the periodic re-authorization nag that ScreenCaptureKit imposes.
+Music Sync uses Core Audio process taps to analyze the active player's audio. The
+audio is processed in memory and is not recorded or saved.
 
-If audio capture ever returns silence, EdgeBeat surfaces a hint and falls back to a global
-system-audio tap.
+Depending on the macOS version, the permission appears under:
 
----
+`System Settings > Privacy & Security > Screen & System Audio Recording`
 
-## How it works
+After changing this permission, quit and reopen EdgeBeat.
 
-### Signal flow
+### Automation
 
-```
-AudioTapEngine ──PCM──▶ BeatAnalyzer ──▶ AudioFeatures ─┐
-                                                        ├─▶ RenderState ─▶ EdgeGlowView
-NowPlayingMonitor ──artwork──▶ PaletteExtractor ──▶ Palette ─┘        (inside OverlayPanel)
+Spotify metadata and playback controls normally use the bundled
+MediaRemoteAdapter and do not require Automation access. AppleScript remains as a
+fallback for player metadata and artwork, so macOS may occasionally request access
+to control Spotify or Music.
 
-AppPreferences ── persisted modes / colors / glow / display / card ───────────▶
-MenuBarController ───────────── updates AppPreferences ────────────────────────▶
-```
+Fallback Automation permissions can be reviewed under:
 
-- **AudioTapEngine** — resolves the playing app's PID → audio process object, creates a
-  Core Audio process tap + a private aggregate device, and streams PCM frames to the
-  analyzer (with a global-tap fallback).
-- **BeatAnalyzer** — Hann-windowed vDSP real FFT (1024 samples) → bass/mid/treble band
-  energy; a smoothed RMS `level`; energy-based onset detection with a refractory window
-  produces `beat` pulses. Publishes `AudioFeatures`.
-- **NowPlayingMonitor** — reads typed metadata through MediaRemoteAdapter on a serial
-  utility queue, with defensive Spotify/Apple Music AppleScript fallbacks; detects the
-  active player, play state, artwork, progress, and track changes.
-- **PaletteExtractor** — downsamples the artwork to 64×64, builds an HSB histogram, scores
-  buckets by *population × saturation × mid-brightness* to pick primary/secondary/accent
-  colors + a dark background tone; caches per track.
-- **RenderState** — merges `AudioFeatures` + `Palette` into smoothed, animatable render
-  parameters and live now-playing progress that drive the view.
-- **AppPreferences** — stores lighting, color, animation, glow, thickness, display, and
-  card choices in native `UserDefaults`, and publishes changes immediately to the UI.
-- **OverlayPanel** — a non-activating, borderless `NSPanel`: clear background,
-  click-through (`ignoresMouseEvents`), `level = .screenSaver`, `collectionBehavior`
-  spanning all Spaces + full-screen apps. Creates one panel per selected display and
-  re-lays them out when the display arrangement changes.
-- **EdgeGlowView** — SwiftUI `Canvas`: independent, edge-to-edge filled wave fields on all
-  four sides, layered into a broad halo, tighter glow, and bright core. It supports
-  music-reactive, gently animated ambient, and zero-clock static rendering.
-- **LockScreenNowPlayingView** — a separate, tightly sized lock-screen panel above the
-  profile area, with artwork, progress, and previous/play-pause/next controls. Keeping it
-  separate preserves click-through behavior everywhere outside the widget.
+`System Settings > Privacy & Security > Automation`
 
-### Why these choices
+### Lock Screen
 
-- **Core Audio process taps** over ScreenCaptureKit — no Screen Recording permission, no
-  periodic re-auth prompts, lower CPU.
-- **Lock-screen card** — uses the same dynamic SkyLight-space technique as
-  [BoringNotch](https://github.com/TheBoredTeam/boring.notch) and its
-  [SkyLightWindow](https://github.com/Lakr233/SkyLightWindow) dependency. This relies on
-  private macOS SkyLight symbols and may require maintenance across macOS releases.
-- **MediaRemoteAdapter** — follows BoringNotch's permission-free approach: `/usr/bin/perl`
-  loads the bundled adapter framework using its system entitlement on macOS 15.4+. The
-  upstream BSD-3-Clause license is included at `Resources/MediaRemoteAdapter.LICENSE`.
-- **AppKit lifecycle + SwiftUI rendering** — AppKit `NSApplication`/`NSStatusItem` for a
-  reliable accessory (menu-bar) app; SwiftUI (via `NSHostingView`) for expressive glow
-  visuals. No custom Metal shaders / asset catalogs / storyboards, since Command Line
-  Tools can't compile those.
-- **SwiftPM + a packaging script** instead of an `.xcodeproj` — builds fully from the CLI
-  with only Command Line Tools installed.
+The lock-screen card uses private macOS SkyLight APIs. No separate user permission
+is normally displayed, but compatibility can change between macOS releases.
 
----
+## Using EdgeBeat
 
-## Project structure
+All controls are available from the waveform icon in the menu bar.
 
-```
-edge/
-├── Package.swift                 # SwiftPM executable target + linked frameworks
-├── README.md                     # this file
-├── Resources/
-│   └── Info.plist                # bundle id, LSUIElement, usage strings, min OS
-├── Sources/EdgeBeat/
-│   ├── main.swift                # entry point (accessory activation)
-│   ├── AppDelegate.swift         # wires everything together
-│   ├── AppPreferences.swift      # persisted feature settings
-│   ├── MenuBarController.swift   # status-item menu and controls
-│   ├── OverlayPanel.swift        # click-through overlay window
-│   ├── EdgeGlowView.swift        # SwiftUI glow rendering
-│   ├── NowPlaying.swift          # player/source and track models
-│   ├── NowPlayingMonitor.swift   # player detection and fallback bridge
-│   ├── MediaRemoteAdapter.swift  # permission-free system Now Playing bridge
-│   ├── PaletteExtractor.swift    # album-art color extraction
-│   ├── RenderState.swift         # audio + palette state for the view
-│   ├── AudioTapEngine.swift      # Core Audio process/global tap
-│   └── BeatAnalyzer.swift        # vDSP FFT + beat/energy detection
-└── scripts/
-    ├── build.sh                  # swift build → assemble .app → codesign
-    └── run.sh                    # build + open
+| Control | Description |
+| --- | --- |
+| Lighting | Enables or disables the display overlay |
+| Animation > Music Sync | Reacts to captured audio and detected beats |
+| Animation > Ambient | Runs a low-motion animated glow without audio capture |
+| Animation > Static | Displays a fixed edge glow |
+| Colors > Album Colors | Derives the palette from the current artwork |
+| Colors > Custom | Uses the selected primary and secondary colors |
+| Glow | Adjusts overall brightness and opacity |
+| Thickness | Adjusts the width and bloom of the edge lighting |
+| Display | Targets the built-in, main, or all connected displays |
+| Lock Screen Now Playing | Shows the now-playing card only while macOS is locked |
+| Music Source | Selects automatic detection, Spotify, or Apple Music |
+| Launch at Login | Starts EdgeBeat when the user signs in |
+| Open Privacy Settings | Opens the macOS privacy settings used by the app |
+
+The lock-screen card includes artwork, title, album information, progress, and
+previous, play/pause, and next controls. It is placed above the authentication
+area and is shown only on the main display.
+
+## Updating
+
+From the repository directory:
+
+```sh
+git pull --ff-only
+bash scripts/build.sh
 ```
 
----
+Quit the installed copy before replacing it:
 
-## Roadmap
+```sh
+pkill -x EdgeBeat 2>/dev/null || true
+ditto EdgeBeat.app /Applications/EdgeBeat.app
+open /Applications/EdgeBeat.app
+```
 
-1. **Scaffold** ✅ — menu-bar app launches (accessory, no Dock icon), On/Off + Quit,
-   build/run scripts, `.app` assembly + signing.
-2. **Overlay** ✅ — click-through, always-on-top glow across Spaces and full-screen apps.
-3. **Color** ✅ — glow colors follow the current album art and update on track changes.
-4. **Beat** ✅ — glow pulses to captured audio, dims on pause, and follows Spotify/Music.
-5. **Polish** ✅ — full menu controls, persistence, multi-display targeting, interactive
-   lock-screen card, adaptive polling, Launch at Login, privacy helper, and capture fallback status.
+## Uninstalling
 
----
+Quit EdgeBeat and remove the application:
 
-## Configuration decisions (locked in)
+```sh
+pkill -x EdgeBeat 2>/dev/null || true
+rm -rf /Applications/EdgeBeat.app
+```
 
-- **Beat sync:** real audio capture (true beat matching).
-- **Players:** both Spotify and Apple Music, auto-detected.
-- **Look:** full-perimeter glow.
-- **Displays:** built-in, current main, or all connected displays.
-- **Notch/top edge:** the glow stays at the true top physical edge and wraps around the
-  notch (uses the full screen frame, not the visible frame), with a thin/translucent top
-  band so the menu bar underneath stays readable.
+To remove stored preferences as well:
 
----
+```sh
+defaults delete com.chaitanya.edgebeat
+```
+
+Remove EdgeBeat from `System Settings > General > Login Items` if it remains listed
+after uninstalling.
 
 ## Troubleshooting
 
-- **No menu-bar icon after `open`?** Check it's running: `pgrep -x EdgeBeat`. If the menu
-  bar is crowded, macOS may hide the icon — widen the menu bar or quit some other menu
-  items.
-- **Colors/beat not reacting?** Make sure you approved the Automation prompt (System
-  Settings → Privacy & Security → Automation → EdgeBeat) and that music is actually
-  playing.
-- **Permissions keep re-prompting after each rebuild?** Set up the self-signed cert (see
-  *Making permission grants stick* above).
+### The menu-bar icon does not appear
+
+Check whether EdgeBeat is running:
+
+```sh
+pgrep -fl EdgeBeat
+```
+
+If it is not running, launch the packaged app again:
+
+```sh
+open EdgeBeat.app
+```
+
+If the menu bar is crowded, macOS may hide some status items.
+
+### The lighting does not appear
+
+- Confirm that `Lighting` is enabled.
+- Confirm that the selected display includes the display being viewed.
+- Try `Animation > Ambient` to verify the overlay independently of audio capture.
+- Quit and reopen EdgeBeat after changing display or privacy settings.
+
+### Spotify is not detected
+
+- Use the desktop Spotify application, not only the web player.
+- Set `Music Source` to `Automatic` or `Spotify`.
+- Start playback before testing detection.
+- Quit and reopen both Spotify and EdgeBeat.
+- Confirm that the packaged adapter exists:
+
+```sh
+test -d EdgeBeat.app/Contents/Resources/MediaRemoteAdapter.framework && echo "Adapter installed"
+```
+
+Do not run `.build/debug/EdgeBeat` directly when testing Spotify. The raw SwiftPM
+executable does not contain the bundled MediaRemoteAdapter resources. Use
+`scripts/run.sh` or open `EdgeBeat.app`.
+
+### Apple Music is not detected
+
+- Set `Music Source` to `Automatic` or `Apple Music`.
+- Confirm that a normal music track is playing.
+- Approve EdgeBeat under Automation settings if macOS presents a fallback prompt.
+
+### The glow does not react to audio
+
+- Confirm that `Animation` is set to `Music Sync`.
+- Check the status text at the top of the EdgeBeat menu.
+- Review the system-audio permission in Privacy & Security settings.
+- Quit and reopen EdgeBeat after granting access.
+- Verify that Spotify or Music is producing audible output.
+
+When a player-specific Core Audio tap cannot be created, EdgeBeat attempts a
+system-wide audio-capture fallback.
+
+### The lock-screen card does not appear
+
+- Enable `Lock Screen Now Playing` before locking the Mac.
+- Keep a supported track playing or paused.
+- Confirm that the main display is active.
+- Restart EdgeBeat after a macOS update.
+
+The lock-screen implementation depends on private SkyLight APIs and may require an
+application update when Apple changes window-server behavior.
+
+### Build fails because of an SDK mismatch
+
+The build script automatically selects the oldest installed macOS SDK to avoid
+common Command Line Tools compatibility issues. A specific SDK can be supplied
+manually:
+
+```sh
+EDGEBEAT_SDKROOT=/path/to/MacOSX.sdk bash scripts/build.sh
+```
+
+For a clean rebuild:
+
+```sh
+rm -rf .build EdgeBeat.app
+bash scripts/build.sh
+```
+
+## Development
+
+### Build commands
+
+```sh
+swift build
+bash scripts/build.sh
+bash scripts/run.sh
+```
+
+`swift build` validates the Swift target. `scripts/build.sh` must be used to create
+a complete application bundle with the icon, Info.plist, MediaRemoteAdapter, and
+license notice.
+
+To sign with a specific local identity instead of ad-hoc signing:
+
+```sh
+EDGEBEAT_SIGN_ID="Developer ID Application: Example" bash scripts/build.sh
+```
+
+### Architecture
+
+```text
+Player metadata -> NowPlayingMonitor -> RenderState -> EdgeGlowView
+Player audio    -> AudioTapEngine    -> BeatAnalyzer -> RenderState
+Preferences     -> AppPreferences    -> Menu and overlay updates
+```
+
+Important components:
+
+- `AppDelegate.swift` wires the application lifecycle and playback pipeline.
+- `NowPlayingMonitor.swift` handles player detection, polling, and fallbacks.
+- `MediaRemoteAdapter.swift` reads system Now Playing metadata and sends controls.
+- `AudioTapEngine.swift` captures player or system audio through Core Audio.
+- `BeatAnalyzer.swift` derives waveform, level, and beat information using vDSP.
+- `PaletteExtractor.swift` extracts display colors from album artwork.
+- `EdgeGlowView.swift` renders the edge and notch-aware wave contours.
+- `OverlayPanel.swift` manages full-screen, multi-display, and lock-screen windows.
+- `SkyLightLockBridge.swift` delegates windows into the private lock-screen Space.
+
+## Privacy
+
+- Audio samples are processed locally in memory.
+- EdgeBeat does not access the microphone.
+- EdgeBeat does not save captured audio.
+- Track metadata and artwork are used only to render the interface.
+- Spotify artwork may be downloaded from the artwork URL when the fallback path is
+  active.
+- EdgeBeat does not upload listening history or captured audio.
+
+## Compatibility Notes
+
+EdgeBeat relies on two implementation details that are not public macOS APIs:
+
+- MediaRemote access through the open-source MediaRemoteAdapter workaround
+- Lock-screen window placement through private SkyLight symbols
+
+These features currently work on the supported development environment but may
+require maintenance after macOS updates. They may also prevent distribution through
+the Mac App Store.
+
+## Third-Party Software
+
+EdgeBeat includes MediaRemoteAdapter by Jonas van den Berg and contributors. It is
+distributed under the BSD 3-Clause License. The complete notice is available in
+`Resources/MediaRemoteAdapter.LICENSE` and is copied into every application bundle.
+
+The lock-screen implementation was informed by the open-source
+[BoringNotch](https://github.com/TheBoredTeam/boring.notch) and
+[SkyLightWindow](https://github.com/Lakr233/SkyLightWindow) projects.
+
+## Project License
+
+This repository does not currently include a project-wide license. Source availability
+does not grant permission to redistribute or publish modified versions unless the
+project owner adds an explicit license.
