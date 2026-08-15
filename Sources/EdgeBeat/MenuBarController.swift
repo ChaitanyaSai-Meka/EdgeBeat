@@ -79,9 +79,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let quit = commandItem("Quit EdgeBeat", action: #selector(quitTapped))
         quit.keyEquivalent = "q"
         menu.addItem(quit)
+        menu.addItem(.separator())
+
+        let versionItem = NSMenuItem(title: Self.versionTitle, action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
 
         syncMenuState()
         return menu
+    }
+
+    private static var versionTitle: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return "EdgeBeat \(version ?? "Development")"
     }
 
     private func makeAnimationMenu() -> NSMenuItem {
