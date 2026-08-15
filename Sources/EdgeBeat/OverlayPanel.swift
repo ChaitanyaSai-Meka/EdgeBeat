@@ -53,8 +53,8 @@ final class OverlayPanel: NSPanel {
 }
 
 private final class LockScreenCardPanel: NSPanel {
-    private static let panelHeight: CGFloat = 124
-    private static let maximumWidth: CGFloat = 430
+    private static let panelHeight: CGFloat = 166
+    private static let maximumWidth: CGFloat = 500
 
     init(screen: NSScreen, renderState: RenderState,
          onPlaybackCommand: @escaping (PlaybackCommand, PlayerSource) -> Void) {
@@ -104,11 +104,11 @@ private final class LockScreenCardPanel: NSPanel {
     }
 
     private static func cardFrame(on screen: NSScreen) -> NSRect {
-        let width = min(maximumWidth, screen.frame.width - 32)
+        let width = min(maximumWidth, screen.frame.width - 40)
         let x = screen.frame.midX - width / 2
         // macOS places authentication around the vertical center. Keeping the
         // card's bottom at 57% places it above the profile without crowding the clock.
-        let y = screen.frame.minY + screen.frame.height * 0.57
+        let y = screen.frame.minY + screen.frame.height * 0.55
         return NSRect(x: x, y: y, width: width, height: panelHeight)
     }
 }

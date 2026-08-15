@@ -65,32 +65,15 @@ pkill -x EdgeBeat
 
 EdgeBeat asks for the minimum it needs, on first use:
 
-- **Automation** (Apple Events) — to read the current song + album artwork from Spotify /
-  Apple Music. You'll get a per-app prompt the first time; approve it. Covered by
-  `NSAppleEventsUsageDescription` in `Resources/Info.plist`.
+- **Now Playing / Automation** — the bundled MediaRemoteAdapter is the primary path for
+  Spotify and Apple Music, so metadata and playback controls do not depend on per-app
+  Automation approval. AppleScript remains as a fallback for metadata and artwork.
 - **Audio capture** — EdgeBeat uses **Core Audio process
   taps**, which capture the music app's audio **without** Screen Recording permission and
   without the periodic re-authorization nag that ScreenCaptureKit imposes.
 
 If audio capture ever returns silence, EdgeBeat surfaces a hint and falls back to a global
 system-audio tap.
-
-### Making permission grants stick across rebuilds
-
-macOS ties permission (TCC) grants to an app's code signature. Plain **ad-hoc** signing
-(the default here) produces a *new* identity on every rebuild, so macOS forgets your
-grants and re-prompts. To make grants persist, create a **one-time self-signed
-code-signing certificate** and the build script will use it automatically:
-
-```sh
-bash scripts/make-signing-cert.sh
-```
-
-You can also point the build at any identity:
-
-```sh
-EDGEBEAT_SIGN_ID="Your Cert Name" bash scripts/build.sh
-```
 
 ---
 
@@ -113,9 +96,9 @@ MenuBarController ───────────── updates AppPreferences
 - **BeatAnalyzer** — Hann-windowed vDSP real FFT (1024 samples) → bass/mid/treble band
   energy; a smoothed RMS `level`; energy-based onset detection with a refractory window
   produces `beat` pulses. Publishes `AudioFeatures`.
-- **NowPlayingMonitor** — polls Spotify (`{name, artist, artwork url} of current track`)
-  and Apple Music (`raw data of artwork 1 of current track`) via AppleScript, guarded by
-  `application "…" is running`; detects the active player, play state, and track changes.
+- **NowPlayingMonitor** — reads typed metadata through MediaRemoteAdapter on a serial
+  utility queue, with defensive Spotify/Apple Music AppleScript fallbacks; detects the
+  active player, play state, artwork, progress, and track changes.
 - **PaletteExtractor** — downsamples the artwork to 64×64, builds an HSB histogram, scores
   buckets by *population × saturation × mid-brightness* to pick primary/secondary/accent
   colors + a dark background tone; caches per track.
@@ -142,8 +125,9 @@ MenuBarController ───────────── updates AppPreferences
   [BoringNotch](https://github.com/TheBoredTeam/boring.notch) and its
   [SkyLightWindow](https://github.com/Lakr233/SkyLightWindow) dependency. This relies on
   private macOS SkyLight symbols and may require maintenance across macOS releases.
-- **AppleScript** for now-playing — the private MediaRemote framework was gated behind an
-  Apple-only entitlement in macOS 15.4, so it's unavailable to third-party apps.
+- **MediaRemoteAdapter** — follows BoringNotch's permission-free approach: `/usr/bin/perl`
+  loads the bundled adapter framework using its system entitlement on macOS 15.4+. The
+  upstream BSD-3-Clause license is included at `Resources/MediaRemoteAdapter.LICENSE`.
 - **AppKit lifecycle + SwiftUI rendering** — AppKit `NSApplication`/`NSStatusItem` for a
   reliable accessory (menu-bar) app; SwiftUI (via `NSHostingView`) for expressive glow
   visuals. No custom Metal shaders / asset catalogs / storyboards, since Command Line
@@ -169,15 +153,15 @@ edge/
 │   ├── OverlayPanel.swift        # click-through overlay window
 │   ├── EdgeGlowView.swift        # SwiftUI glow rendering
 │   ├── NowPlaying.swift          # player/source and track models
-│   ├── NowPlayingMonitor.swift   # Spotify/Music AppleScript bridge
+│   ├── NowPlayingMonitor.swift   # player detection and fallback bridge
+│   ├── MediaRemoteAdapter.swift  # permission-free system Now Playing bridge
 │   ├── PaletteExtractor.swift    # album-art color extraction
 │   ├── RenderState.swift         # audio + palette state for the view
 │   ├── AudioTapEngine.swift      # Core Audio process/global tap
 │   └── BeatAnalyzer.swift        # vDSP FFT + beat/energy detection
 └── scripts/
     ├── build.sh                  # swift build → assemble .app → codesign
-    ├── run.sh                    # build + open
-    └── make-signing-cert.sh      # one-time self-signed certificate
+    └── run.sh                    # build + open
 ```
 
 ---

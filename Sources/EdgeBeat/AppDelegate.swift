@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observePreferences()
 
         if preferences.enabled { overlay.show() }
+        nowPlaying.setSource(preferences.playerSource)
         nowPlaying.start()
     }
 

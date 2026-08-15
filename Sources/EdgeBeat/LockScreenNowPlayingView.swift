@@ -5,18 +5,25 @@ struct LockScreenNowPlayingView: View {
     let onPlaybackCommand: (PlaybackCommand, PlayerSource) -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            artwork
-                .frame(width: 84, height: 84)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
 
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 18) {
+            artwork
+                .frame(width: 112, height: 112)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                }
+                .shadow(color: accent.opacity(0.25), radius: 14, y: 6)
+
+            VStack(alignment: .leading, spacing: 8) {
                 Text(track.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .lineLimit(1)
 
                 Text(subtitle)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
@@ -25,7 +32,7 @@ struct LockScreenNowPlayingView: View {
                     .tint(accent)
                     .animation(.linear(duration: 1.2), value: progress)
 
-                HStack(spacing: 18) {
+                HStack(spacing: 22) {
                     controlButton(.previousTrack, icon: "backward.fill", label: "Previous")
                     controlButton(
                         .togglePlayPause,
@@ -38,14 +45,32 @@ struct LockScreenNowPlayingView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
+        .padding(18)
+        .background(.ultraThinMaterial, in: shape)
+        .background {
+            shape
+                .fill(accent.opacity(0.1))
+                .blendMode(.plusLighter)
         }
-        .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
-        .padding(4)
+        .overlay {
+            shape.stroke(
+                LinearGradient(
+                    colors: [.white.opacity(0.42), .white.opacity(0.08), accent.opacity(0.24)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                lineWidth: 1
+            )
+        }
+        .overlay(alignment: .top) {
+            Capsule()
+                .fill(.white.opacity(0.24))
+                .frame(width: 120, height: 1)
+                .padding(.top, 2)
+        }
+        .shadow(color: accent.opacity(0.16), radius: 28, y: 10)
+        .shadow(color: .black.opacity(0.32), radius: 22, y: 12)
+        .padding(5)
     }
 
     private var track: NowPlayingTrack {
@@ -82,10 +107,19 @@ struct LockScreenNowPlayingView: View {
             onPlaybackCommand(command, track.source)
         } label: {
             Image(systemName: icon)
-                .font(.system(size: isPrimary ? 15 : 12, weight: .semibold))
+                .font(.system(size: isPrimary ? 17 : 13, weight: .semibold))
                 .foregroundStyle(isPrimary ? Color.black : Color.white)
-                .frame(width: isPrimary ? 32 : 26, height: isPrimary ? 32 : 26)
-                .background(isPrimary ? accent : Color.white.opacity(0.1))
+                .frame(width: isPrimary ? 42 : 34, height: isPrimary ? 42 : 34)
+                .background {
+                    if isPrimary {
+                        Circle().fill(accent.opacity(0.94))
+                    } else {
+                        Circle().fill(.thinMaterial)
+                    }
+                }
+                .overlay {
+                    Circle().stroke(.white.opacity(isPrimary ? 0.28 : 0.16), lineWidth: 1)
+                }
                 .clipShape(Circle())
                 .contentShape(Circle())
         }

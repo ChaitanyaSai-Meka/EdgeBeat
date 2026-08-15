@@ -55,6 +55,9 @@ final class AppPreferences: ObservableObject {
     @Published var nowPlayingCardEnabled: Bool {
         didSet { defaults.set(nowPlayingCardEnabled, forKey: Keys.nowPlayingCardEnabled) }
     }
+    @Published var playerSource: PlayerSource {
+        didSet { defaults.set(playerSource.rawValue, forKey: Keys.playerSource) }
+    }
 
     private let defaults: UserDefaults
 
@@ -74,6 +77,7 @@ final class AppPreferences: ObservableObject {
         thickness = defaults.object(forKey: Keys.thickness) as? Double ?? 0.45
         displayTarget = DisplayTarget(rawValue: defaults.string(forKey: Keys.displayTarget) ?? "") ?? .builtIn
         nowPlayingCardEnabled = defaults.object(forKey: Keys.nowPlayingCardEnabled) as? Bool ?? false
+        playerSource = PlayerSource(rawValue: defaults.string(forKey: Keys.playerSource) ?? "") ?? .automatic
     }
 
     private func store(_ color: NSColor, key: String) {
@@ -101,5 +105,6 @@ final class AppPreferences: ObservableObject {
         static let thickness = "glow.thickness"
         static let displayTarget = "display.target"
         static let nowPlayingCardEnabled = "nowPlaying.cardEnabled"
+        static let playerSource = "player.source"
     }
 }

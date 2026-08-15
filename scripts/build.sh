@@ -27,25 +27,21 @@ rm -rf "$APP_DIR"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BUILD_DIR/$APP_NAME" "$CONTENTS/MacOS/$APP_NAME"
 cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
+if [ -f "$ROOT/Resources/mediaremote-adapter.pl" ]; then
+  cp "$ROOT/Resources/mediaremote-adapter.pl" "$CONTENTS/Resources/mediaremote-adapter.pl"
+fi
+if [ -f "$ROOT/Resources/MediaRemoteAdapter.LICENSE" ]; then
+  cp "$ROOT/Resources/MediaRemoteAdapter.LICENSE" "$CONTENTS/Resources/MediaRemoteAdapter.LICENSE"
+fi
+if [ -d "$ROOT/Resources/MediaRemoteAdapter.framework" ]; then
+  cp -R "$ROOT/Resources/MediaRemoteAdapter.framework" "$CONTENTS/Resources/MediaRemoteAdapter.framework"
+fi
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
   cp "$ROOT/Resources/AppIcon.icns" "$CONTENTS/Resources/AppIcon.icns"
 fi
 
-# Signing identity: env override > self-signed cert (if present) > ad-hoc.
-SIGN_ID="${EDGEBEAT_SIGN_ID:-}"
-if [ -z "$SIGN_ID" ]; then
-  if security find-identity -v -p codesigning 2>/dev/null | grep -q "EdgeBeat Self-Signed"; then
-    SIGN_ID="EdgeBeat Self-Signed"
-  fi
-fi
-
-if [ -n "$SIGN_ID" ]; then
-  echo "==> codesign with '$SIGN_ID' (TCC permission grants persist across rebuilds)"
-  codesign --force --sign "$SIGN_ID" "$APP_DIR"
-else
-  echo "==> codesign ad-hoc (macOS may re-ask for permissions after each rebuild;"
-  echo "    run scripts/make-signing-cert.sh once so grants stick)"
-  codesign --force --sign - "$APP_DIR"
-fi
+SIGN_ID="${EDGEBEAT_SIGN_ID:--}"
+echo "==> codesign with '$SIGN_ID'"
+codesign --force --sign "$SIGN_ID" "$APP_DIR"
 
 echo "==> built: $APP_DIR"

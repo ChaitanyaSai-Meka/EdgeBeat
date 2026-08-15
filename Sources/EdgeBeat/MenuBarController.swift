@@ -15,7 +15,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var colorModeItems: [CustomColorMode: NSMenuItem] = [:]
     private var displayItems: [DisplayTarget: NSMenuItem] = [:]
     private var sourceItems: [PlayerSource: NSMenuItem] = [:]
-    private var selectedSource: PlayerSource = .automatic
+    private var selectedSource: PlayerSource
     private var cardItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
 
@@ -26,6 +26,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     init(preferences: AppPreferences) {
         self.preferences = preferences
+        selectedSource = preferences.playerSource
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -266,6 +267,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard let raw = sender.representedObject as? String,
               let source = PlayerSource(rawValue: raw) else { return }
         selectedSource = source
+        preferences.playerSource = source
         sourceItems.forEach { $0.value.state = $0.key == selectedSource ? .on : .off }
         onSourceChange?(source)
     }
