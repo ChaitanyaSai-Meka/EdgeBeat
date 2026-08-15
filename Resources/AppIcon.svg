@@ -1,0 +1,35 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background with slight gradient -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1c1c1e" />
+      <stop offset="100%" stop-color="#000000" />
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff007f" />
+      <stop offset="50%" stop-color="#7000ff" />
+      <stop offset="100%" stop-color="#00e5ff" />
+    </linearGradient>
+    <filter id="blur">
+      <feGaussianBlur stdDeviation="15" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect width="1024" height="1024" rx="225" ry="225" fill="url(#bg)" />
+
+  <!-- Outer Glow Ring -->
+  <rect x="80" y="80" width="864" height="864" rx="160" ry="160" fill="none" stroke="url(#glow)" stroke-width="30" filter="url(#blur)" opacity="0.8" />
+  
+  <!-- Solid Inner Ring -->
+  <rect x="80" y="80" width="864" height="864" rx="160" ry="160" fill="none" stroke="url(#glow)" stroke-width="20" />
+
+  <!-- Central Waveform (Beat) -->
+  <g stroke="white" stroke-width="35" stroke-linecap="round">
+    <line x1="332" y1="452" x2="332" y2="572" />
+    <line x1="422" y1="362" x2="422" y2="662" />
+    <line x1="512" y1="212" x2="512" y2="812" />
+    <line x1="602" y1="362" x2="602" y2="662" />
+    <line x1="692" y1="452" x2="692" y2="572" />
+  </g>
+</svg>
