@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private let nowPlaying = NowPlayingMonitor()
     private let audioTap = AudioTapEngine()
+    private let audioOutputMonitor = AudioOutputMonitor()
     private let beatAnalyzer: BeatAnalyzer? = BeatAnalyzer()
     private let updateChecker = GitHubUpdateChecker()
     private let displaySleepController = DisplaySleepController()
@@ -32,11 +33,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyPowerPolicy()
 
         nowPlaying.start()
+        audioOutputMonitor.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         nowPlaying.stop()
+        audioOutputMonitor.stop()
         audioTap.stop()
+        renderState.setWaveFlowAnimationActive(false)
         displaySleepController.setPrevented(false)
     }
 
@@ -63,6 +67,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configurePlaybackPipeline() {
+        audioOutputMonitor.onRouteChange = { [weak self] route in
+            self?.renderState.update(audioOutputRoute: route)
+        }
         nowPlaying.onPlaybackUpdate = { [weak self] track in
             guard let self else { return }
             currentTrack = track
@@ -70,12 +77,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay.refreshLockScreenCard()
             menuBar?.setNowPlaying(track)
             syncAudioCapture()
+            syncWaveFlowAnimation()
             syncDisplaySleepPrevention()
         }
         beatAnalyzer?.onFeatures = { [weak self] features in
             guard let self,
-                  preferences.enabled,
-                  preferences.animationMode == .musicSync else { return }
+                  preferences.enabled else { return }
             renderState.update(audio: features)
         }
         audioTap.onSamples = { [weak self] samples, sampleRate in
@@ -93,13 +100,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if enabled { overlay.show() } else { overlay.hide() }
                 syncAudioCapture()
+                syncWaveFlowAnimation()
                 syncDisplaySleepPrevention()
             }
             .store(in: &cancellables)
 
-        preferences.$animationMode
+        preferences.$waveFlowEnabled
             .removeDuplicates()
-            .sink { [weak self] _ in self?.syncAudioCapture() }
+            .sink { [weak self] _ in self?.syncWaveFlowAnimation() }
+            .store(in: &cancellables)
+
+        preferences.$waveSpeed
+            .removeDuplicates()
+            .sink { [weak self] speed in self?.renderState.setWaveFlowSpeed(speed) }
             .store(in: &cancellables)
 
         preferences.$displayTarget
@@ -136,7 +149,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func syncAudioCapture() {
         let shouldCapture = preferences.enabled
-            && preferences.animationMode == .musicSync
             && currentTrack.state == .playing
             && !areDisplaysAsleep
 
@@ -176,7 +188,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         syncAudioCapture()
+        syncWaveFlowAnimation()
         syncDisplaySleepPrevention()
+    }
+
+    private func syncWaveFlowAnimation() {
+        let shouldAnimate = preferences.enabled
+            && preferences.waveFlowEnabled
+            && currentTrack.state == .playing
+            && !areDisplaysAsleep
+        renderState.setWaveFlowAnimationActive(shouldAnimate)
     }
 
     private func syncDisplaySleepPrevention() {

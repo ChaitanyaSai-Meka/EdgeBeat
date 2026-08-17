@@ -16,6 +16,7 @@ final class MediaRemoteAdapter {
         let duration: Double?
         let elapsedTimeNow: Double?
         let elapsedTime: Double?
+        let shuffleMode: Int?
         let timestamp: String?
         let artworkData: String?
         let uniqueIdentifier: String?
@@ -70,7 +71,8 @@ final class MediaRemoteAdapter {
             state: payload.playing == true ? .playing : .paused,
             processID: processID,
             duration: payload.duration ?? 0,
-            position: position
+            position: position,
+            isShuffleEnabled: (payload.shuffleMode ?? 0) != 0
         )
     }
 
@@ -80,8 +82,13 @@ final class MediaRemoteAdapter {
         case .togglePlayPause: commandID = "2"
         case .nextTrack: commandID = "4"
         case .previousTrack: commandID = "5"
+        case .toggleShuffle: return false
         }
         return runVoid(arguments: ["send", commandID])
+    }
+
+    func setShuffle(enabled: Bool) -> Bool {
+        runVoid(arguments: ["shuffle", enabled ? "1" : "0"])
     }
 
     private func estimatedElapsedTime(from payload: Payload) -> TimeInterval {

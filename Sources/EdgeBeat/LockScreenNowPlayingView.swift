@@ -5,21 +5,21 @@ struct LockScreenNowPlayingView: View {
     let onPlaybackCommand: (PlaybackCommand, PlayerSource) -> Void
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
 
-        HStack(spacing: 18) {
+        HStack(spacing: 20) {
             artwork
-                .frame(width: 112, height: 112)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(width: 124, height: 124)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
                 }
-                .shadow(color: accent.opacity(0.25), radius: 14, y: 6)
+                .shadow(color: accent.opacity(0.3), radius: 16, y: 7)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(track.title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .lineLimit(1)
 
                 Text(subtitle)
@@ -27,12 +27,28 @@ struct LockScreenNowPlayingView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(accent)
-                    .animation(.linear(duration: 1.2), value: progress)
+                VStack(spacing: 3) {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .tint(accent)
+                        .animation(.linear(duration: 1), value: progress)
 
-                HStack(spacing: 22) {
+                    HStack {
+                        Text(formatTime(track.position))
+                        Spacer()
+                        Text("-\(formatTime(max(0, track.duration - track.position)))")
+                    }
+                    .font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                }
+
+                HStack(spacing: 17) {
+                    controlButton(
+                        .toggleShuffle,
+                        icon: "shuffle",
+                        label: track.isShuffleEnabled ? "Turn Shuffle Off" : "Turn Shuffle On",
+                        isActive: track.isShuffleEnabled
+                    )
                     controlButton(.previousTrack, icon: "backward.fill", label: "Previous")
                     controlButton(
                         .togglePlayPause,
@@ -41,6 +57,7 @@ struct LockScreenNowPlayingView: View {
                         isPrimary: true
                     )
                     controlButton(.nextTrack, icon: "forward.fill", label: "Next")
+                    outputRoute
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -49,13 +66,19 @@ struct LockScreenNowPlayingView: View {
         .background(.ultraThinMaterial, in: shape)
         .background {
             shape
-                .fill(accent.opacity(0.1))
+                .fill(
+                    LinearGradient(
+                        colors: [accent.opacity(0.16), .clear, accent.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .blendMode(.plusLighter)
         }
         .overlay {
             shape.stroke(
                 LinearGradient(
-                    colors: [.white.opacity(0.42), .white.opacity(0.08), accent.opacity(0.24)],
+                    colors: [.white.opacity(0.5), .white.opacity(0.1), accent.opacity(0.3)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
@@ -64,13 +87,13 @@ struct LockScreenNowPlayingView: View {
         }
         .overlay(alignment: .top) {
             Capsule()
-                .fill(.white.opacity(0.24))
-                .frame(width: 120, height: 1)
+                .fill(.white.opacity(0.28))
+                .frame(width: 150, height: 1)
                 .padding(.top, 2)
         }
-        .shadow(color: accent.opacity(0.16), radius: 28, y: 10)
-        .shadow(color: .black.opacity(0.32), radius: 22, y: 12)
-        .padding(5)
+        .shadow(color: accent.opacity(0.18), radius: 30, y: 12)
+        .shadow(color: .black.opacity(0.34), radius: 24, y: 14)
+        .padding(6)
     }
 
     private var track: NowPlayingTrack {
@@ -82,7 +105,20 @@ struct LockScreenNowPlayingView: View {
     }
 
     private var subtitle: String {
-        track.album.isEmpty ? track.artist : "\(track.artist) - \(track.album)"
+        if track.artist.isEmpty { return track.album }
+        if track.album.isEmpty { return track.artist }
+        return "\(track.artist) - \(track.album)"
+    }
+
+    private var outputRoute: some View {
+        Image(systemName: renderState.audioOutputRoute.kind.symbolName)
+            .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 34, height: 34)
+        .background(.thinMaterial, in: Circle())
+        .overlay { Circle().stroke(.white.opacity(0.15), lineWidth: 1) }
+        .help("Playing on \(renderState.audioOutputRoute.name)")
+        .accessibilityLabel("Playing on \(renderState.audioOutputRoute.name)")
     }
 
     @ViewBuilder
@@ -95,32 +131,35 @@ struct LockScreenNowPlayingView: View {
             ZStack {
                 Color.white.opacity(0.08)
                 Image(systemName: "music.note")
-                    .font(.system(size: 24, weight: .medium))
+                    .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    private func controlButton(_ command: PlaybackCommand, icon: String, label: String,
-                               isPrimary: Bool = false) -> some View {
+    private func controlButton(
+        _ command: PlaybackCommand,
+        icon: String,
+        label: String,
+        isPrimary: Bool = false,
+        isActive: Bool = false
+    ) -> some View {
         Button {
             onPlaybackCommand(command, track.source)
         } label: {
             Image(systemName: icon)
                 .font(.system(size: isPrimary ? 17 : 13, weight: .semibold))
-                .foregroundStyle(isPrimary ? Color.black : Color.white)
-                .frame(width: isPrimary ? 42 : 34, height: isPrimary ? 42 : 34)
+                .foregroundStyle(isPrimary ? Color.black : (isActive ? accent : Color.white))
+                .frame(width: isPrimary ? 44 : 34, height: isPrimary ? 44 : 34)
                 .background {
-                    if isPrimary {
-                        Circle().fill(accent.opacity(0.94))
-                    } else {
-                        Circle().fill(.thinMaterial)
-                    }
+                    Circle().fill(isPrimary ? AnyShapeStyle(accent.opacity(0.96)) : AnyShapeStyle(.thinMaterial))
                 }
                 .overlay {
-                    Circle().stroke(.white.opacity(isPrimary ? 0.28 : 0.16), lineWidth: 1)
+                    Circle().stroke(
+                        isActive ? accent.opacity(0.7) : .white.opacity(isPrimary ? 0.3 : 0.15),
+                        lineWidth: 1
+                    )
                 }
-                .clipShape(Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -131,5 +170,11 @@ struct LockScreenNowPlayingView: View {
     private var progress: Double {
         guard track.duration > 0 else { return 0 }
         return min(1, max(0, track.position / track.duration))
+    }
+
+    private func formatTime(_ value: TimeInterval) -> String {
+        guard value.isFinite, value >= 0 else { return "0:00" }
+        let totalSeconds = Int(value.rounded(.down))
+        return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
     }
 }

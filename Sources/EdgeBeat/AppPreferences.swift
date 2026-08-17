@@ -11,16 +11,36 @@ enum CustomColorMode: String, CaseIterable {
     case gradient = "Gradient"
 }
 
-enum GlowAnimationMode: String, CaseIterable {
-    case musicSync = "Music Sync"
-    case ambient = "Ambient"
-    case `static` = "Static"
-}
-
 enum DisplayTarget: String, CaseIterable {
     case builtIn = "Built-in Display"
     case main = "Main Display"
     case all = "All Displays"
+}
+
+enum WaveSpeedPreset: Int, CaseIterable {
+    case slow
+    case medium
+    case fast
+
+    var title: String {
+        switch self {
+        case .slow: "Slow"
+        case .medium: "Medium"
+        case .fast: "Fast"
+        }
+    }
+
+    var speed: Double {
+        switch self {
+        case .slow: 0.3
+        case .medium: 0.6
+        case .fast: 1
+        }
+    }
+
+    static func nearest(to speed: Double) -> WaveSpeedPreset {
+        allCases.min { abs($0.speed - speed) < abs($1.speed - speed) } ?? .medium
+    }
 }
 
 final class AppPreferences: ObservableObject {
@@ -40,14 +60,23 @@ final class AppPreferences: ObservableObject {
     @Published var secondaryColor: NSColor {
         didSet { store(secondaryColor, key: Keys.secondaryColor) }
     }
-    @Published var animationMode: GlowAnimationMode {
-        didSet { defaults.set(animationMode.rawValue, forKey: Keys.animationMode) }
-    }
     @Published var intensity: Double {
         didSet { defaults.set(intensity, forKey: Keys.intensity) }
     }
     @Published var thickness: Double {
         didSet { defaults.set(thickness, forKey: Keys.thickness) }
+    }
+    @Published var waveFlowEnabled: Bool {
+        didSet { defaults.set(waveFlowEnabled, forKey: Keys.waveFlowEnabled) }
+    }
+    @Published var waveLength: Double {
+        didSet { defaults.set(waveLength, forKey: Keys.waveLength) }
+    }
+    @Published var waveIntensity: Double {
+        didSet { defaults.set(waveIntensity, forKey: Keys.waveIntensity) }
+    }
+    @Published var waveSpeed: Double {
+        didSet { defaults.set(waveSpeed, forKey: Keys.waveSpeed) }
     }
     @Published var displayTarget: DisplayTarget {
         didSet { defaults.set(displayTarget.rawValue, forKey: Keys.displayTarget) }
@@ -70,11 +99,14 @@ final class AppPreferences: ObservableObject {
             ?? NSColor(calibratedRed: 0.2, green: 0.65, blue: 1, alpha: 1)
         secondaryColor = Self.loadColor(defaults: defaults, key: Keys.secondaryColor)
             ?? NSColor(calibratedRed: 1, green: 0.25, blue: 0.65, alpha: 1)
-        animationMode = GlowAnimationMode(
-            rawValue: defaults.string(forKey: Keys.animationMode) ?? ""
-        ) ?? .musicSync
+        let usedLegacyOrbit = defaults.string(forKey: Keys.animationMode) == "Orbit"
         intensity = defaults.object(forKey: Keys.intensity) as? Double ?? 0.85
         thickness = defaults.object(forKey: Keys.thickness) as? Double ?? 0.45
+        waveFlowEnabled = defaults.object(forKey: Keys.waveFlowEnabled) as? Bool ?? usedLegacyOrbit
+        waveLength = defaults.object(forKey: Keys.waveLength) as? Double ?? 0.5
+        waveIntensity = defaults.object(forKey: Keys.waveIntensity) as? Double ?? 0.75
+        let storedWaveSpeed = defaults.object(forKey: Keys.waveSpeed) as? Double ?? 0.6
+        waveSpeed = WaveSpeedPreset.nearest(to: storedWaveSpeed).speed
         displayTarget = DisplayTarget(rawValue: defaults.string(forKey: Keys.displayTarget) ?? "") ?? .builtIn
         nowPlayingCardEnabled = defaults.object(forKey: Keys.nowPlayingCardEnabled) as? Bool ?? false
         playerSource = PlayerSource(rawValue: defaults.string(forKey: Keys.playerSource) ?? "") ?? .automatic
@@ -103,6 +135,10 @@ final class AppPreferences: ObservableObject {
         static let animationMode = "animation.mode"
         static let intensity = "glow.intensity"
         static let thickness = "glow.thickness"
+        static let waveFlowEnabled = "waveFlow.enabled"
+        static let waveLength = "waveFlow.length"
+        static let waveIntensity = "waveFlow.intensity"
+        static let waveSpeed = "waveFlow.speed"
         static let displayTarget = "display.target"
         static let nowPlayingCardEnabled = "nowPlaying.cardEnabled"
         static let playerSource = "player.source"

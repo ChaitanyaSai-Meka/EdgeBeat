@@ -56,11 +56,22 @@ final class NowPlayingMonitor {
     func perform(_ command: PlaybackCommand, for source: PlayerSource) {
         guard source == .spotify || source == .music else { return }
         let appName = source == .spotify ? "Spotify" : "Music"
-        let script = "tell application \"\(appName)\" to \(command.rawValue)"
+        let script: String
+        if command == .toggleShuffle {
+            let property = source == .spotify ? "shuffling" : "shuffle enabled"
+            script = "tell application \"\(appName)\" to set \(property) to not (\(property))"
+        } else {
+            script = "tell application \"\(appName)\" to \(command.rawValue)"
+        }
 
         pollQueue.async { [weak self] in
             guard let self else { return }
-            let sentByMediaRemote = source == .spotify && self.mediaRemote.send(command)
+            let sentByMediaRemote: Bool
+            if source == .spotify, command == .toggleShuffle {
+                sentByMediaRemote = self.mediaRemote.setShuffle(enabled: !self.lastTrack.isShuffleEnabled)
+            } else {
+                sentByMediaRemote = source == .spotify && self.mediaRemote.send(command)
+            }
             if !sentByMediaRemote {
                 self.executeAppleScript(script, key: "command.\(source.rawValue).\(command.rawValue)")
             }
@@ -182,7 +193,8 @@ final class NowPlayingMonitor {
             set trackID to trackID & separator & (persistent ID of current track)
             set durationValue to duration of current track
             set positionValue to player position
-            return stateText & separator & trackID & separator & durationValue & separator & positionValue
+            set shuffleValue to (shuffle enabled as text)
+            return stateText & separator & trackID & separator & durationValue & separator & positionValue & separator & shuffleValue
           end tell
         end if
         return \"\"
@@ -192,7 +204,7 @@ final class NowPlayingMonitor {
             return nil
         }
         let fields = output.components(separatedBy: String(UnicodeScalar(31)))
-        guard fields.count >= 8 else { return nil }
+        guard fields.count >= 9 else { return nil }
         let state = PlaybackState(rawValue: fields[0]) ?? .unavailable
         let identifier = fields[5]
         let processID = NSRunningApplication.runningApplications(
@@ -208,7 +220,8 @@ final class NowPlayingMonitor {
             state: state,
             processID: processID,
             duration: TimeInterval(fields[6]) ?? 0,
-            position: TimeInterval(fields[7]) ?? 0
+            position: TimeInterval(fields[7]) ?? 0,
+            isShuffleEnabled: fields[8].lowercased() == "true"
         )
     }
 
@@ -219,7 +232,7 @@ final class NowPlayingMonitor {
           try
             set stateText to (player state as text)
             if stateText is "stopped" then return {}
-            return {stateText, name of current track, artist of current track, album of current track, artwork url of current track, duration of current track, player position}
+            return {stateText, name of current track, artist of current track, album of current track, artwork url of current track, duration of current track, player position, shuffling}
           on error
             return {}
           end try
@@ -227,7 +240,7 @@ final class NowPlayingMonitor {
         """
 
         guard let descriptor = runAppleScriptDescriptor(script, key: "Spotify.Playback"),
-              descriptor.numberOfItems >= 7 else { return nil }
+              descriptor.numberOfItems >= 8 else { return nil }
         let state = PlaybackState(rawValue: descriptor.atIndex(1)?.stringValue?.lowercased() ?? "")
             ?? .unavailable
         guard state == .playing || state == .paused else { return nil }
@@ -246,7 +259,8 @@ final class NowPlayingMonitor {
             state: state,
             processID: processID,
             duration: normalizedSpotifyDuration(descriptor.atIndex(6)?.doubleValue ?? 0),
-            position: descriptor.atIndex(7)?.doubleValue ?? 0
+            position: descriptor.atIndex(7)?.doubleValue ?? 0,
+            isShuffleEnabled: descriptor.atIndex(8)?.booleanValue ?? false
         )
     }
 

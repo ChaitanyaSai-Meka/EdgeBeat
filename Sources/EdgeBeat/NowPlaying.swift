@@ -17,6 +17,30 @@ enum PlaybackCommand: String {
     case previousTrack = "previous track"
     case togglePlayPause = "playpause"
     case nextTrack = "next track"
+    case toggleShuffle = "toggle shuffle"
+}
+
+enum AudioOutputKind: Equatable {
+    case mac
+    case earbuds
+    case headphones
+    case speaker
+
+    var symbolName: String {
+        switch self {
+        case .mac: "laptopcomputer"
+        case .earbuds: "airpodspro"
+        case .headphones: "headphones"
+        case .speaker: "hifispeaker.fill"
+        }
+    }
+}
+
+struct AudioOutputRoute: Equatable {
+    let name: String
+    let kind: AudioOutputKind
+
+    static let builtIn = AudioOutputRoute(name: "Mac Speakers", kind: .mac)
 }
 
 struct NowPlayingTrack: Equatable {
@@ -30,6 +54,7 @@ struct NowPlayingTrack: Equatable {
     let processID: pid_t?
     let duration: TimeInterval
     let position: TimeInterval
+    let isShuffleEnabled: Bool
 
     static let empty = NowPlayingTrack(
         source: .automatic,
@@ -41,11 +66,15 @@ struct NowPlayingTrack: Equatable {
         state: .unavailable,
         processID: nil,
         duration: 0,
-        position: 0
+        position: 0,
+        isShuffleEnabled: false
     )
 
     static func == (lhs: NowPlayingTrack, rhs: NowPlayingTrack) -> Bool {
-        lhs.source == rhs.source && lhs.identifier == rhs.identifier && lhs.state == rhs.state
+        lhs.source == rhs.source
+            && lhs.identifier == rhs.identifier
+            && lhs.state == rhs.state
+            && lhs.isShuffleEnabled == rhs.isShuffleEnabled
     }
 
     func withArtwork(_ artwork: NSImage?) -> NowPlayingTrack {
@@ -59,7 +88,24 @@ struct NowPlayingTrack: Equatable {
             state: state,
             processID: processID,
             duration: duration,
-            position: position
+            position: position,
+            isShuffleEnabled: isShuffleEnabled
+        )
+    }
+
+    func withShuffle(_ enabled: Bool) -> NowPlayingTrack {
+        NowPlayingTrack(
+            source: source,
+            title: title,
+            artist: artist,
+            album: album,
+            artwork: artwork,
+            identifier: identifier,
+            state: state,
+            processID: processID,
+            duration: duration,
+            position: position,
+            isShuffleEnabled: enabled
         )
     }
 }

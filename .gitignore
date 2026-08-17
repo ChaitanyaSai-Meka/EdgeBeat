@@ -1,3 +1,5 @@
+.vscode
+
 # SwiftPM and compiler output
 .build/
 .swiftpm/

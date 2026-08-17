@@ -77,8 +77,8 @@ final class OverlayPanel: NSPanel {
 }
 
 private final class LockScreenCardPanel: NSPanel {
-    private static let panelHeight: CGFloat = 166
-    private static let maximumWidth: CGFloat = 500
+    private static let panelHeight: CGFloat = 184
+    private static let maximumWidth: CGFloat = 548
 
     init(screen: NSScreen, renderState: RenderState,
          onPlaybackCommand: @escaping (PlaybackCommand, PlayerSource) -> Void) {

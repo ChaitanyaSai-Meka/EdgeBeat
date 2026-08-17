@@ -8,16 +8,17 @@ The application runs from the menu bar, stays visible over full-screen apps,
 supports multiple displays, follows the physical MacBook notch, and can show an
 interactive now-playing card on the lock screen.
 
-Current version: `1.0.0`
+Current version: `1.1.0`
 
 ## Features
 
-- Music-reactive edge waves driven by real system audio
+- Continuous perimeter Wave Flow driven by real system audio
 - Spotify and Apple Music detection
 - Album-art color extraction
 - Custom single-color and gradient modes
-- Music Sync, Ambient, and Static animation modes
-- Adjustable glow intensity and thickness
+- Switchable Glow and Wave Flow visual modes
+- Adjustable wave length and intensity
+- Slow, Medium, and Fast wave-speed presets
 - Built-in, main, or all-display targeting
 - Notch-aware lighting on supported MacBook displays
 - Full-screen app and multi-Space support
@@ -121,9 +122,10 @@ build.
 1. Start Spotify or Apple Music and play a track.
 2. Open the EdgeBeat menu-bar menu.
 3. Enable `Lighting`.
-4. Set `Animation` to `Music Sync`.
-5. Set `Music Source` to `Automatic`, `Spotify`, or `Apple Music`.
-6. Approve the system-audio permission if macOS requests it.
+4. Enable `Wave > Wave Flow` when you want the traveling perimeter light.
+5. Select a Slow, Medium, or Fast Wave Speed preset.
+6. Set `Music Source` to `Automatic`, `Spotify`, or `Apple Music`.
+7. Approve the system-audio permission if macOS requests it.
 
 Album colors and audio response may take a few seconds to appear after the first
 track begins playing.
@@ -167,13 +169,14 @@ All controls are available from the waveform icon in the menu bar.
 | Control | Description |
 | --- | --- |
 | Lighting | Enables or disables the display overlay |
-| Animation > Music Sync | Reacts to captured audio and detected beats |
-| Animation > Ambient | Runs a low-motion animated glow without audio capture |
-| Animation > Static | Displays a fixed edge glow |
 | Colors > Album Colors | Derives the palette from the current artwork |
 | Colors > Custom | Uses the selected primary and secondary colors |
-| Glow | Adjusts overall brightness and opacity |
+| Glow | Adjusts the brightness of the soft edge glow |
 | Thickness | Adjusts the width and bloom of the edge lighting |
+| Wave > Wave Flow | Enables the single traveling perimeter light |
+| Wave > Wave Length | Controls how much of the perimeter the wave occupies |
+| Wave > Wave Intensity | Controls how solid and bright the wave appears |
+| Wave > Wave Speed | Selects a Slow, Medium, or Fast travel-speed preset |
 | Display | Targets the built-in, main, or all connected displays |
 | Lock Screen Now Playing | Shows the now-playing card only while macOS is locked |
 | Music Source | Selects automatic detection, Spotify, or Apple Music |
@@ -184,6 +187,12 @@ All controls are available from the waveform icon in the menu bar.
 The lock-screen card includes artwork, title, album information, progress, and
 previous, play/pause, and next controls. It is placed above the authentication
 area and is shown only on the main display.
+
+## Release Notes
+
+Versioned release notes are available in [RELEASE_NOTES.md](RELEASE_NOTES.md).
+Each entry links to detailed notes covering new features, behavior changes,
+installation considerations, and known limitations for that release.
 
 ## Updating
 
@@ -259,7 +268,8 @@ If the menu bar is crowded, macOS may hide some status items.
 
 - Confirm that `Lighting` is enabled.
 - Confirm that the selected display includes the display being viewed.
-- Try `Animation > Ambient` to verify the overlay independently of audio capture.
+- If Wave Flow is disabled, confirm that `Glow` is above 0%.
+- If Wave Flow is enabled, confirm that `Wave Intensity` is above 0%.
 - Quit and reopen EdgeBeat after changing display or privacy settings.
 
 ### Spotify is not detected
@@ -284,9 +294,11 @@ executable does not contain the bundled MediaRemoteAdapter resources. Use
 - Confirm that a normal music track is playing.
 - Approve EdgeBeat under Automation settings if macOS presents a fallback prompt.
 
-### The glow does not react to audio
+### The lighting does not react to audio
 
-- Confirm that `Animation` is set to `Music Sync`.
+- Confirm that `Lighting` is enabled and a supported player is actively playing.
+- When testing the traveling perimeter effect, confirm that `Wave > Wave Flow`
+  is enabled.
 - Check the status text at the top of the EdgeBeat menu.
 - Review the system-audio permission in Privacy & Security settings.
 - Quit and reopen EdgeBeat after granting access.
