@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show toolchain
+        run: |
+          xcode-select -p
+          xcodebuild -version
+          swift --version
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build application bundle
+        run: bash scripts/build.sh
+
+      - name: Package release archive
+        run: bash scripts/package-release.sh "$RUNNER_TEMP/EdgeBeat.zip"
+
+      - name: Verify application bundle
+        run: |
+          codesign --verify --deep --strict EdgeBeat.app
+          plutil -lint EdgeBeat.app/Contents/Info.plist
+
+      - name: Check patch formatting
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [[ -n "$BASE_REF" ]]; then
+            git diff --check "origin/$BASE_REF...HEAD"
+          else
+            git diff --check HEAD^ HEAD
+          fi
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: EdgeBeat
+          path: ${{ runner.temp }}/EdgeBeat.zip
+          if-no-files-found: error

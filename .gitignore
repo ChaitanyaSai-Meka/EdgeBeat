@@ -6,6 +6,7 @@
 
 # Generated application bundle and signing artifacts
 EdgeBeat.app/
+EdgeBeat.zip
 *.dSYM/
 
 # macOS metadata

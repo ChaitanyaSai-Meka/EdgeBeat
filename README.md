@@ -8,7 +8,7 @@ The application runs from the menu bar, stays visible over full-screen apps,
 supports multiple displays, follows the physical MacBook notch, and can show an
 interactive now-playing card on the lock screen.
 
-Current version: `1.1.0`
+Current version: `1.2.0`
 
 ## Features
 
@@ -23,6 +23,7 @@ Current version: `1.1.0`
 - Notch-aware lighting on supported MacBook displays
 - Full-screen app and multi-Space support
 - Lock-screen artwork, progress, and playback controls
+- Separate Now Playing window with artwork, progress, playback controls, and full-screen mode
 - Persistent settings and optional Launch at Login
 - Adaptive refresh rates that respect macOS Low Power Mode and display sleep
 - Menu-bar-only operation with no Dock icon
@@ -179,6 +180,7 @@ All controls are available from the waveform icon in the menu bar.
 | Wave > Wave Speed | Selects a Slow, Medium, or Fast travel-speed preset |
 | Display | Targets the built-in, main, or all connected displays |
 | Lock Screen Now Playing | Shows the now-playing card only while macOS is locked |
+| Open Now Playing Window | Opens a dedicated companion player window that can enter full screen |
 | Music Source | Selects automatic detection, Spotify, or Apple Music |
 | Launch at Login | Starts EdgeBeat when the user signs in |
 | Open Privacy Settings | Opens the macOS privacy settings used by the app |
@@ -187,6 +189,13 @@ All controls are available from the waveform icon in the menu bar.
 The lock-screen card includes artwork, title, album information, progress, and
 previous, play/pause, and next controls. It is placed above the authentication
 area and is shown only on the main display.
+
+The companion Now Playing window provides a larger listening view with album
+artwork, track metadata, progress, shuffle, previous, play/pause, next, and
+output-device controls. Use the full-screen button in the window header or the
+standard macOS green window control to enter full screen. The companion remains
+connected to the same Spotify or Apple Music monitor as the menu-bar and
+lock-screen controls.
 
 ## Release Notes
 
@@ -335,6 +344,39 @@ bash scripts/build.sh
 ```
 
 ## Development
+
+### Automated checks
+
+Pull requests run the macOS CI workflow in `.github/workflows/ci.yml`. It runs
+the Swift test target, assembles the release application bundle, verifies its
+signature and property list, and checks the submitted diff for whitespace
+errors.
+
+Run the same checks locally with full Xcode installed:
+
+```bash
+swift test
+bash scripts/build.sh
+codesign --verify --deep --strict EdgeBeat.app
+plutil -lint EdgeBeat.app/Contents/Info.plist
+git diff --check
+```
+
+Apple's standalone Command Line Tools do not always include XCTest. In that
+environment the application build still works, but the test target requires a
+full Xcode installation or the GitHub Actions macOS runner.
+
+### Release packaging
+
+`EdgeBeat.zip` is generated rather than stored in the repository. To create the
+same archive distributed on the Releases page, run:
+
+```bash
+bash scripts/package-release.sh
+```
+
+The tagged `v*` GitHub Actions workflow builds, verifies, and attaches this
+archive to the matching GitHub release.
 
 ### Build commands
 
