@@ -135,7 +135,7 @@ track begins playing.
 
 ### System Audio
 
-Music Sync uses Core Audio process taps to analyze the active player's audio. The
+EdgeBeat uses Core Audio process taps to analyze the active player's audio. The
 audio is processed in memory and is not recorded or saved.
 
 Depending on the macOS version, the permission appears under:
@@ -195,7 +195,9 @@ artwork, track metadata, progress, shuffle, previous, play/pause, next, and
 output-device controls. Use the full-screen button in the window header or the
 standard macOS green window control to enter full screen. The companion remains
 connected to the same Spotify or Apple Music monitor as the menu-bar and
-lock-screen controls.
+lock-screen controls. The native close and minimize buttons hide the window
+without stopping playback monitoring, and the controls remain available after
+entering or leaving macOS full screen.
 
 ## Release Notes
 
@@ -349,14 +351,15 @@ bash scripts/build.sh
 
 Pull requests run the macOS CI workflow in `.github/workflows/ci.yml`. It runs
 the Swift test target, assembles the release application bundle, verifies its
-signature and property list, and checks the submitted diff for whitespace
-errors.
+signature and property list, creates a release archive, uploads the archive as a
+workflow artifact, and checks the submitted diff for whitespace errors.
 
 Run the same checks locally with full Xcode installed:
 
 ```bash
 swift test
 bash scripts/build.sh
+bash scripts/package-release.sh
 codesign --verify --deep --strict EdgeBeat.app
 plutil -lint EdgeBeat.app/Contents/Info.plist
 git diff --check

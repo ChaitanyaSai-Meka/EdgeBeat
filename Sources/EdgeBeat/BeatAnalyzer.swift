@@ -8,8 +8,6 @@ struct AudioFeatures {
     var treble: Double
     var beat: Bool
     var waveform: [Double]
-
-    static let silence = AudioFeatures(level: 0, bass: 0, mid: 0, treble: 0, beat: false, waveform: [])
 }
 
 final class BeatAnalyzer {

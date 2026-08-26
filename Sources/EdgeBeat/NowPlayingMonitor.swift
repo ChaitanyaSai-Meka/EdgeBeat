@@ -377,7 +377,7 @@ final class NowPlayingMonitor {
         end tell
         """
 
-        guard let descriptor = runAppleScriptDescriptor(script, key: "Spotify.Playback"),
+        guard let descriptor = executeCachedAppleScript(script, key: "Spotify.Playback"),
               descriptor.numberOfItems >= 8 else { return nil }
         let state = PlaybackState(rawValue: descriptor.atIndex(1)?.stringValue?.lowercased() ?? "")
             ?? .unavailable
@@ -501,12 +501,8 @@ final class NowPlayingMonitor {
     }
 
     private func runAppleScript(_ source: String, key: String) -> String? {
-        guard let descriptor = runAppleScriptDescriptor(source, key: key) else { return nil }
+        guard let descriptor = executeCachedAppleScript(source, key: key) else { return nil }
         return descriptor.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func runAppleScriptDescriptor(_ source: String, key: String) -> NSAppleEventDescriptor? {
-        executeCachedAppleScript(source, key: key)
     }
 
     private func executeAppleScript(_ source: String) {

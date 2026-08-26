@@ -9,7 +9,8 @@ record.
 ### [EdgeBeat 1.2.0](docs/releases/1.2.0.md) - 2026-08-22
 
 Introduces the dedicated Now Playing companion window with full-screen playback
-controls and an album-art-focused listening view.
+controls, an album-art-focused listening view, and stability improvements across
+the playback and audio-analysis pipelines.
 
 ## Previous Releases
 

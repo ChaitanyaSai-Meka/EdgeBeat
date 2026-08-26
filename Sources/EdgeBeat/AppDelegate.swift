@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioTap.stop()
         renderState.setWaveFlowAnimationActive(false)
         displaySleepController.setPrevented(false)
-        companionWindow.close()
+        companionWindow.hide()
     }
 
     private func configureMenuBar() {

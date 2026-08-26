@@ -12,7 +12,6 @@ struct CompanionNowPlayingView: View {
     @State private var pendingSeekTarget: TimeInterval?
     @State private var backdropImage: NSImage?
     @State private var backdropIdentifier = ""
-    @FocusState private var isKeyboardFocused: Bool
 
     private static let contentMaxWidth: CGFloat = 760
     private static let horizontalInset: CGFloat = 40
@@ -53,9 +52,6 @@ struct CompanionNowPlayingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .preferredColorScheme(.dark)
-        .focusable()
-        .focused($isKeyboardFocused)
-        .onAppear { isKeyboardFocused = true }
         .onChange(of: track.position, initial: true) { _, newValue in
             if let pendingSeekTarget {
                 let tolerance = max(2, track.duration * 0.01)
@@ -79,23 +75,6 @@ struct CompanionNowPlayingView: View {
             updateBackdrop()
         }
         .onAppear { updateBackdrop() }
-        .onKeyPress(.space) {
-            guard canControlPlayback else { return .ignored }
-            onPlaybackCommand(.togglePlayPause, track.source)
-            return .handled
-        }
-        .onKeyPress(keys: [.leftArrow, .rightArrow]) { keyPress in
-            if keyPress.modifiers.contains(.command), canControlPlayback {
-                let command: PlaybackCommand = keyPress.key == .leftArrow
-                    ? .previousTrack
-                    : .nextTrack
-                onPlaybackCommand(command, track.source)
-                return .handled
-            }
-            guard canSeek else { return .ignored }
-            seekRelative(by: keyPress.key == .leftArrow ? -10 : 10)
-            return .handled
-        }
     }
 
     private var track: NowPlayingTrack {
@@ -445,8 +424,6 @@ struct CompanionNowPlayingView: View {
         return CGFloat(min(0.46, max(0.06, activity * 0.46)))
     }
 
-    // MARK: - Progress
-
     @ViewBuilder
     private var progress: some View {
         if track.state == .playing {
@@ -557,8 +534,6 @@ struct CompanionNowPlayingView: View {
         guard width > 0 else { return 0 }
         return min(1, max(0, Double(x / width)))
     }
-
-    // MARK: - Controls
 
     private func controls(isCompact: Bool) -> some View {
         HStack(spacing: 12) {

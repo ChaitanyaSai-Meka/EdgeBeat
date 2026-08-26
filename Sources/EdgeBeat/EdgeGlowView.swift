@@ -55,7 +55,6 @@ struct EdgeGlowView: View {
                 )
             )
             : nil
-        let glowOpacity = baseGlowOpacity
         let waveResponse = min(1, 0.58 + level * 0.3
             + renderState.waveFlowBeatEnvelope * 0.2)
         let waveOpacity = preferences.waveIntensity * waveResponse
@@ -73,20 +72,20 @@ struct EdgeGlowView: View {
                                  waveform: waveform, colors: glowColors,
                                  baseDepth: 15 * thicknessScale * beatBloom,
                                  waveDepth: waveDepth * 1.2 * thicknessScale,
-                                 blur: 20 * thicknessScale, opacity: 0.36 * glowOpacity,
+                                 blur: 20 * thicknessScale, opacity: 0.36 * baseGlowOpacity,
                                  includeTopBoundary: true)
                     drawWaveBand(context: &context, size: size, fields: fields,
                                  waveform: waveform, colors: glowColors,
                                  baseDepth: 7 * thicknessScale * beatBloom,
                                  waveDepth: waveDepth * 0.72 * thicknessScale,
-                                 blur: 7 * thicknessScale, opacity: 0.62 * glowOpacity,
+                                 blur: 7 * thicknessScale, opacity: 0.62 * baseGlowOpacity,
                                  includeTopBoundary: true)
                     drawWaveBand(context: &context, size: size, fields: fields,
                                  waveform: waveform, colors: glowColors,
                                  baseDepth: max(1, 2.2 * thicknessScale),
                                  waveDepth: waveDepth * 0.24 * thicknessScale,
                                  blur: max(0.6, 1.2 * thicknessScale),
-                                 opacity: 0.94 * glowOpacity,
+                                 opacity: 0.94 * baseGlowOpacity,
                                  includeTopBoundary: true)
                 }
                 .blendMode(.screen)
