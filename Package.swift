@@ -17,6 +17,11 @@ let package = Package(
                 .linkedFramework("CoreImage"),
                 .linkedFramework("ServiceManagement"),
             ]
+        ),
+        .testTarget(
+            name: "EdgeBeatTests",
+            dependencies: ["EdgeBeat"],
+            path: "Tests/EdgeBeatTests"
         )
     ]
 )

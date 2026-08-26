@@ -15,7 +15,7 @@ final class AudioTapEngine {
         }
     }
 
-    var onSamples: (([Float], Double) -> Void)?
+    var onSamples: (([Float], Double, UInt64) -> Void)?
     var onStatusChange: ((String?) -> Void)?
 
     private let logger = Logger(subsystem: "com.chaitanya.edgebeat", category: "audio")
@@ -31,19 +31,19 @@ final class AudioTapEngine {
     private var pendingSamples: [Float] = []
     private let sampleDeliverySize = 2048
 
-    func start(processID: pid_t?) {
+    func start(processID: pid_t?, session: UInt64) {
         controlQueue.async { [weak self] in
-            self?.startOnControlQueue(processID: processID)
+            self?.startOnControlQueue(processID: processID, session: session)
         }
     }
 
-    private func startOnControlQueue(processID: pid_t?) {
+    private func startOnControlQueue(processID: pid_t?, session: UInt64) {
         let processDescription = processID.map(String.init) ?? "global"
         logger.info("Starting audio tap for process \(processDescription, privacy: .public)")
         guard activeProcessID != processID || tapID == kAudioObjectUnknown else { return }
         stopOnControlQueue()
         do {
-            try createTap(processID: processID)
+            try createTap(processID: processID, session: session)
             activeProcessID = processID
             logger.notice("Audio tap started")
             onStatusChange?("Audio capture active - waiting for sound...")
@@ -51,7 +51,7 @@ final class AudioTapEngine {
             logger.error("Player-specific audio tap failed: \(error.localizedDescription, privacy: .public)")
             if processID != nil {
                 do {
-                    try createTap(processID: nil)
+                    try createTap(processID: nil, session: session)
                     activeProcessID = nil
                     logger.notice("Global audio fallback started")
                     onStatusChange?("System-wide audio capture active - waiting for sound...")
@@ -73,6 +73,81 @@ final class AudioTapEngine {
 
     private func stopOnControlQueue() {
         logger.info("Stopping audio tap")
+        rollbackTapResources()
+        activeProcessID = nil
+    }
+
+    private func createTap(processID: pid_t?, session: UInt64) throws {
+        guard #available(macOS 14.2, *) else { throw TapError.unsupported }
+        let description: CATapDescription
+        if let processID, let objectID = processObjectID(for: processID) {
+            description = CATapDescription(stereoMixdownOfProcesses: [objectID])
+        } else {
+            description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        }
+        description.name = "EdgeBeat Audio Tap"
+        description.uuid = UUID()
+        description.muteBehavior = .unmuted
+        description.isPrivate = true
+
+        do {
+            try check(AudioHardwareCreateProcessTap(description, &tapID), "Create process tap")
+            format = try audioFormat(for: tapID)
+            logger.notice("Tap format: \(self.format.mSampleRate) Hz, \(self.format.mChannelsPerFrame) channels, \(self.format.mBitsPerChannel) bits, flags \(self.format.mFormatFlags)")
+
+            let aggregateUID = "com.chaitanya.edgebeat.aggregate.\(UUID().uuidString)"
+            let dictionary: [String: Any] = [
+                kAudioAggregateDeviceNameKey: "EdgeBeat Audio Capture",
+                kAudioAggregateDeviceUIDKey: aggregateUID,
+                kAudioAggregateDeviceIsPrivateKey: true,
+                kAudioAggregateDeviceTapAutoStartKey: true,
+                kAudioAggregateDeviceTapListKey: [[
+                    kAudioSubTapUIDKey: description.uuid.uuidString,
+                    kAudioSubTapDriftCompensationKey: true,
+                ]],
+            ]
+            try check(AudioHardwareCreateAggregateDevice(dictionary as CFDictionary, &aggregateDeviceID),
+                      "Create aggregate device")
+
+            let sampleRate = format.mSampleRate
+            var createdIOProc: AudioDeviceIOProcID?
+            let status = AudioDeviceCreateIOProcIDWithBlock(&createdIOProc, aggregateDeviceID, ioQueue) {
+                [weak self] _, inputData, _, _, _ in
+                guard let self else { return }
+                let samples = self.copyMonoSamples(from: inputData)
+                if samples.isEmpty {
+                    if !self.hasReportedEmptyBuffer {
+                        self.hasReportedEmptyBuffer = true
+                        self.logger.error("Audio callback arrived without readable Float32 samples")
+                        self.onStatusChange?("Audio callback received an unsupported or empty buffer.")
+                    }
+                    return
+                }
+                if !self.hasReceivedSamples {
+                    self.hasReceivedSamples = true
+                    self.logger.notice("Receiving audio samples")
+                    self.onStatusChange?("Audio capture active")
+                }
+                self.pendingSamples.append(contentsOf: samples)
+                guard self.pendingSamples.count >= self.sampleDeliverySize else { return }
+                var batch: [Float] = []
+                swap(&batch, &self.pendingSamples)
+                self.pendingSamples.reserveCapacity(self.sampleDeliverySize)
+                self.onSamples?(batch, sampleRate, session)
+            }
+            try check(status, "Create audio IO callback")
+            guard let createdIOProc else {
+                throw TapError.coreAudio("Create audio IO callback", OSStatus(-1))
+            }
+            ioProcID = createdIOProc
+            try check(AudioDeviceStart(aggregateDeviceID, createdIOProc), "Start audio capture")
+        } catch {
+            rollbackTapResources()
+            throw error
+        }
+    }
+
+    private func rollbackTapResources() {
         if aggregateDeviceID != kAudioObjectUnknown, let ioProcID {
             AudioDeviceStop(aggregateDeviceID, ioProcID)
             AudioDeviceDestroyIOProcID(aggregateDeviceID, ioProcID)
@@ -86,72 +161,12 @@ final class AudioTapEngine {
             if #available(macOS 14.2, *) { AudioHardwareDestroyProcessTap(tapID) }
         }
         tapID = kAudioObjectUnknown
-        activeProcessID = nil
-        hasReceivedSamples = false
-        hasReportedEmptyBuffer = false
-        pendingSamples.removeAll(keepingCapacity: true)
-    }
-
-    private func createTap(processID: pid_t?) throws {
-        guard #available(macOS 14.2, *) else { throw TapError.unsupported }
-        let description: CATapDescription
-        if let processID, let objectID = processObjectID(for: processID) {
-            description = CATapDescription(stereoMixdownOfProcesses: [objectID])
-        } else {
-            description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        format = AudioStreamBasicDescription()
+        ioQueue.sync {
+            hasReceivedSamples = false
+            hasReportedEmptyBuffer = false
+            pendingSamples.removeAll(keepingCapacity: true)
         }
-        description.name = "EdgeBeat Audio Tap"
-        description.uuid = UUID()
-        description.muteBehavior = .unmuted
-        description.isPrivate = true
-
-        try check(AudioHardwareCreateProcessTap(description, &tapID), "Create process tap")
-        format = try audioFormat(for: tapID)
-        logger.notice("Tap format: \(self.format.mSampleRate) Hz, \(self.format.mChannelsPerFrame) channels, \(self.format.mBitsPerChannel) bits, flags \(self.format.mFormatFlags)")
-
-        let aggregateUID = "com.chaitanya.edgebeat.aggregate.\(UUID().uuidString)"
-        let dictionary: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "EdgeBeat Audio Capture",
-            kAudioAggregateDeviceUIDKey: aggregateUID,
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceTapListKey: [[
-                kAudioSubTapUIDKey: description.uuid.uuidString,
-                kAudioSubTapDriftCompensationKey: true,
-            ]],
-        ]
-        try check(AudioHardwareCreateAggregateDevice(dictionary as CFDictionary, &aggregateDeviceID),
-                  "Create aggregate device")
-
-        let sampleRate = format.mSampleRate
-        var createdIOProc: AudioDeviceIOProcID?
-        let status = AudioDeviceCreateIOProcIDWithBlock(&createdIOProc, aggregateDeviceID, ioQueue) {
-            [weak self] _, inputData, _, _, _ in
-            guard let self else { return }
-            let samples = self.copyMonoSamples(from: inputData)
-            if samples.isEmpty {
-                if !self.hasReportedEmptyBuffer {
-                    self.hasReportedEmptyBuffer = true
-                    self.logger.error("Audio callback arrived without readable Float32 samples")
-                    self.onStatusChange?("Audio callback received an unsupported or empty buffer.")
-                }
-                return
-            }
-            if !self.hasReceivedSamples {
-                self.hasReceivedSamples = true
-                self.logger.notice("Receiving audio samples")
-                self.onStatusChange?("Audio capture active")
-            }
-            self.pendingSamples.append(contentsOf: samples)
-            guard self.pendingSamples.count >= self.sampleDeliverySize else { return }
-            var batch: [Float] = []
-            swap(&batch, &self.pendingSamples)
-            self.pendingSamples.reserveCapacity(self.sampleDeliverySize)
-            self.onSamples?(batch, sampleRate)
-        }
-        try check(status, "Create audio IO callback")
-        ioProcID = createdIOProc
-        try check(AudioDeviceStart(aggregateDeviceID, createdIOProc), "Start audio capture")
     }
 
     private func processObjectID(for processID: pid_t) -> AudioObjectID? {

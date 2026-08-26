@@ -13,9 +13,10 @@ struct AudioFeatures {
 }
 
 final class BeatAnalyzer {
-    var onFeatures: ((AudioFeatures) -> Void)?
+    var onFeatures: ((AudioFeatures, UInt64) -> Void)?
 
     private let analysisQueue = DispatchQueue(label: "com.chaitanya.edgebeat.analysis", qos: .utility)
+    private let sessionLock = NSLock()
     private let fftSize = 2048
     private let log2Size: vDSP_Length
     private let fftSetup: FFTSetup
@@ -27,6 +28,7 @@ final class BeatAnalyzer {
     private var lastAnalysisTime = 0.0
     private var minimumAnalysisInterval = 1.0 / 20.0
     private var previousWaveform = [Double](repeating: 0, count: 128)
+    private var activeSessionGeneration: UInt64 = 0
 
     init?() {
         log2Size = vDSP_Length(log2(Float(fftSize)))
@@ -41,9 +43,42 @@ final class BeatAnalyzer {
         vDSP_destroy_fftsetup(fftSetup)
     }
 
-    func consume(samples: [Float], sampleRate: Double) {
+    static func isValidSampleRate(_ sampleRate: Double) -> Bool {
+        sampleRate.isFinite && sampleRate > 0
+    }
+
+    func beginSession(_ generation: UInt64) {
+        sessionLock.lock()
+        activeSessionGeneration = generation
+        sessionLock.unlock()
         analysisQueue.async { [weak self] in
-            self?.consumeOnAnalysisQueue(samples: samples, sampleRate: sampleRate)
+            guard let self else { return }
+            guard self.isActive(generation) else { return }
+            self.resetAnalysisState()
+        }
+    }
+
+    func endSession(_ generation: UInt64) {
+        sessionLock.lock()
+        guard activeSessionGeneration == generation else {
+            sessionLock.unlock()
+            return
+        }
+        activeSessionGeneration &+= 1
+        sessionLock.unlock()
+        analysisQueue.sync { [weak self] in
+            self?.resetAnalysisState()
+        }
+    }
+
+    func consume(samples: [Float], sampleRate: Double, session: UInt64) {
+        guard Self.isValidSampleRate(sampleRate) else { return }
+        analysisQueue.async { [weak self] in
+            self?.consumeOnAnalysisQueue(
+                samples: samples,
+                sampleRate: sampleRate,
+                session: session
+            )
         }
     }
 
@@ -53,7 +88,10 @@ final class BeatAnalyzer {
         }
     }
 
-    private func consumeOnAnalysisQueue(samples: [Float], sampleRate: Double) {
+    private func consumeOnAnalysisQueue(samples: [Float], sampleRate: Double,
+                                        session: UInt64) {
+        guard isActive(session),
+              Self.isValidSampleRate(sampleRate) else { return }
         pendingSamples.append(contentsOf: samples)
         let maximumBufferedSamples = fftSize * 2
         if pendingSamples.count > maximumBufferedSamples {
@@ -67,10 +105,11 @@ final class BeatAnalyzer {
         let frame = Array(pendingSamples.suffix(fftSize))
         pendingSamples.removeAll(keepingCapacity: true)
         lastAnalysisTime = now
-        analyze(frame, sampleRate: sampleRate, now: now)
+        analyze(frame, sampleRate: sampleRate, now: now, session: session)
     }
 
-    private func analyze(_ samples: [Float], sampleRate: Double, now: TimeInterval) {
+    private func analyze(_ samples: [Float], sampleRate: Double, now: TimeInterval,
+                         session: UInt64) {
         var windowed = [Float](repeating: 0, count: fftSize)
         vDSP_vmul(samples, 1, window, 1, &windowed, 1, vDSP_Length(fftSize))
 
@@ -119,7 +158,25 @@ final class BeatAnalyzer {
             beat: isBeat,
             waveform: makeWaveform(from: samples)
         )
-        DispatchQueue.main.async { [weak self] in self?.onFeatures?(features) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isActive(session) else { return }
+            self.onFeatures?(features, session)
+        }
+    }
+
+    private func resetAnalysisState() {
+        pendingSamples.removeAll(keepingCapacity: true)
+        smoothedLevel = 0
+        bassHistory.removeAll(keepingCapacity: true)
+        lastBeatTime = 0
+        lastAnalysisTime = 0
+        previousWaveform = [Double](repeating: 0, count: previousWaveform.count)
+    }
+
+    private func isActive(_ generation: UInt64) -> Bool {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        return activeSessionGeneration == generation
     }
 
     private func bandEnergy(_ magnitudes: [Float], from lowHz: Double, to highHz: Double,

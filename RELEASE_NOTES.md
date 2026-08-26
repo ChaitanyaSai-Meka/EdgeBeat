@@ -6,12 +6,17 @@ record.
 
 ## Current Release
 
-### [EdgeBeat 1.1.0](docs/releases/1.1.0.md) - 2026-08-17
+### [EdgeBeat 1.2.0](docs/releases/1.2.0.md) - 2026-08-22
 
-Introduces the continuous perimeter Wave Flow, richer lock-screen controls,
-in-app update checking, and power-efficiency improvements.
+Introduces the dedicated Now Playing companion window with full-screen playback
+controls and an album-art-focused listening view.
 
 ## Previous Releases
+
+### [EdgeBeat 1.1.0](docs/releases/1.1.0.md) - 2026-08-18
+
+Introduced the continuous perimeter Wave Flow, richer lock-screen controls,
+in-app update checking, and power-efficiency improvements.
 
 ### [EdgeBeat 1.0.0](docs/releases/1.0.0.md) - 2026-08-16
 

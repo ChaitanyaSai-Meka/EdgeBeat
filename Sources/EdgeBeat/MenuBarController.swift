@@ -71,6 +71,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var sourceItems: [PlayerSource: NSMenuItem] = [:]
     private var selectedSource: PlayerSource
     private var cardItem: NSMenuItem!
+    private var companionItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
     private var checkForUpdatesItem: NSMenuItem!
     private var colorPreviewItem: NSMenuItem!
@@ -89,6 +90,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onOpenPermissions: (() -> Void)?
     var onLaunchAtLoginChange: ((Bool) -> Bool)?
     var onCheckForUpdates: (() -> Void)?
+    var onToggleCompanion: (() -> Void)?
+    private var isCompanionVisible = false
 
     init(preferences: AppPreferences) {
         self.preferences = preferences
@@ -141,6 +144,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         cardItem = commandItem("Lock Screen Now Playing", action: #selector(toggleCard(_:)),
                                icon: "lock.rectangle")
         menu.addItem(cardItem)
+        companionItem = commandItem("Open Now Playing Window", action: #selector(toggleCompanion(_:)),
+                                    icon: "rectangle.inset.filled")
+        menu.addItem(companionItem)
         menu.addItem(makeSourceMenu())
         menu.addItem(.separator())
 
@@ -516,6 +522,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         syncMenuState()
     }
 
+    @objc private func toggleCompanion(_ sender: NSMenuItem) {
+        onToggleCompanion?()
+    }
+
     @objc private func sourceChanged(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let source = PlayerSource(rawValue: raw) else { return }
@@ -577,6 +587,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         displayItems.forEach { $0.value.state = $0.key == preferences.displayTarget ? .on : .off }
         sourceItems.forEach { $0.value.state = $0.key == selectedSource ? .on : .off }
         cardItem?.state = preferences.nowPlayingCardEnabled ? .on : .off
+        companionItem?.state = isCompanionVisible ? .on : .off
     }
 
     private func colorsMatch(_ lhs: NSColor, _ rhs: NSColor) -> Bool {
@@ -608,5 +619,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func setCheckingForUpdates(_ checking: Bool) {
         checkForUpdatesItem?.title = checking ? "Checking for Updates..." : "Check for Updates..."
         checkForUpdatesItem?.isEnabled = !checking
+    }
+
+    func setCompanionVisible(_ visible: Bool) {
+        isCompanionVisible = visible
+        companionItem?.title = visible ? "Close Now Playing Window" : "Open Now Playing Window"
+        companionItem?.state = visible ? .on : .off
     }
 }

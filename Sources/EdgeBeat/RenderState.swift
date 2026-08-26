@@ -20,13 +20,14 @@ final class RenderState: ObservableObject {
 
     private var beatResetWork: DispatchWorkItem?
     private var paletteTrackIdentifier = ""
+    private var paletteArtworkRevision = ""
     private var waveFlowTimer: Timer?
     private var waveFlowLastFrameTime = 0.0
     private var isWaveFlowAnimationActive = false
     private var waveFlowSpeed = 0.5
 
     func update(track: NowPlayingTrack) {
-        let artworkChanged = (self.track.artwork == nil) != (track.artwork == nil)
+        let artworkChanged = self.track.artworkRevision != track.artworkRevision
         if self.track.identifier != track.identifier
             || self.track.state != track.state
             || self.track.position != track.position
@@ -38,12 +39,20 @@ final class RenderState: ObservableObject {
         if isPlaying != playing { isPlaying = playing }
         if trackTitle != track.title { trackTitle = track.title }
         if trackArtist != track.artist { trackArtist = track.artist }
-        if track.artwork != nil, track.identifier != paletteTrackIdentifier {
+        if track.artwork != nil,
+           (track.identifier != paletteTrackIdentifier
+            || track.artworkRevision != paletteArtworkRevision) {
             palette = PaletteExtractor.extract(from: track.artwork)
             paletteTrackIdentifier = track.identifier
+            paletteArtworkRevision = track.artworkRevision
         } else if track.identifier.isEmpty {
             palette = .default
             paletteTrackIdentifier = ""
+            paletteArtworkRevision = ""
+        } else if track.artwork == nil, track.identifier != paletteTrackIdentifier {
+            palette = .default
+            paletteTrackIdentifier = track.identifier
+            paletteArtworkRevision = ""
         }
         if !playing, level != 0 {
             withAnimation(.easeOut(duration: 0.4)) { level = 0 }
@@ -63,6 +72,17 @@ final class RenderState: ObservableObject {
             beatResetWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: work)
         }
+    }
+
+    func resetAudio() {
+        beatResetWork?.cancel()
+        beatResetWork = nil
+        waveform = []
+        bass = 0
+        mid = 0
+        treble = 0
+        level = 0
+        beat = false
     }
 
     func setLowPowerMode(_ enabled: Bool) {

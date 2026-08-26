@@ -43,12 +43,46 @@ struct AudioOutputRoute: Equatable {
     static let builtIn = AudioOutputRoute(name: "Mac Speakers", kind: .mac)
 }
 
+enum ArtworkRevision {
+    static func data(_ data: Data) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in data {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
+    }
+
+    static func image(_ image: NSImage?) -> String {
+        guard let data = image?.tiffRepresentation else { return "" }
+        return self.data(data)
+    }
+}
+
+struct GenerationCounter {
+    private(set) var current: UInt64 = 0
+
+    mutating func next() -> UInt64 {
+        current &+= 1
+        return current
+    }
+
+    mutating func invalidate() {
+        current &+= 1
+    }
+
+    func matches(_ generation: UInt64) -> Bool {
+        generation == current
+    }
+}
+
 struct NowPlayingTrack: Equatable {
     let source: PlayerSource
     let title: String
     let artist: String
     let album: String
     let artwork: NSImage?
+    let artworkRevision: String
     let identifier: String
     let state: PlaybackState
     let processID: pid_t?
@@ -62,6 +96,7 @@ struct NowPlayingTrack: Equatable {
         artist: "",
         album: "",
         artwork: nil,
+        artworkRevision: "",
         identifier: "",
         state: .unavailable,
         processID: nil,
@@ -75,15 +110,25 @@ struct NowPlayingTrack: Equatable {
             && lhs.identifier == rhs.identifier
             && lhs.state == rhs.state
             && lhs.isShuffleEnabled == rhs.isShuffleEnabled
+            && lhs.title == rhs.title
+            && lhs.artist == rhs.artist
+            && lhs.album == rhs.album
+            && lhs.duration == rhs.duration
+            && lhs.artworkRevision == rhs.artworkRevision
     }
 
-    func withArtwork(_ artwork: NSImage?) -> NowPlayingTrack {
+    var artworkCacheKey: String {
+        [source.rawValue, identifier, title, artist, album].joined(separator: "|")
+    }
+
+    func withArtwork(_ artwork: NSImage?, revision: String? = nil) -> NowPlayingTrack {
         NowPlayingTrack(
             source: source,
             title: title,
             artist: artist,
             album: album,
             artwork: artwork,
+            artworkRevision: artwork == nil ? "" : (revision ?? ArtworkRevision.image(artwork)),
             identifier: identifier,
             state: state,
             processID: processID,
@@ -93,19 +138,37 @@ struct NowPlayingTrack: Equatable {
         )
     }
 
-    func withShuffle(_ enabled: Bool) -> NowPlayingTrack {
+    func withState(_ state: PlaybackState) -> NowPlayingTrack {
         NowPlayingTrack(
             source: source,
             title: title,
             artist: artist,
             album: album,
             artwork: artwork,
+            artworkRevision: artworkRevision,
             identifier: identifier,
             state: state,
             processID: processID,
             duration: duration,
             position: position,
-            isShuffleEnabled: enabled
+            isShuffleEnabled: isShuffleEnabled
+        )
+    }
+
+    func withPosition(_ position: TimeInterval) -> NowPlayingTrack {
+        NowPlayingTrack(
+            source: source,
+            title: title,
+            artist: artist,
+            album: album,
+            artwork: artwork,
+            artworkRevision: artworkRevision,
+            identifier: identifier,
+            state: state,
+            processID: processID,
+            duration: duration,
+            position: max(0, position),
+            isShuffleEnabled: isShuffleEnabled
         )
     }
 }

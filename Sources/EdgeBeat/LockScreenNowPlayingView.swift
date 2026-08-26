@@ -63,7 +63,7 @@ struct LockScreenNowPlayingView: View {
             }
         }
         .padding(18)
-        .background(.ultraThinMaterial, in: shape)
+        .background(.thickMaterial, in: shape)
         .background {
             shape
                 .fill(
@@ -78,22 +78,15 @@ struct LockScreenNowPlayingView: View {
         .overlay {
             shape.stroke(
                 LinearGradient(
-                    colors: [.white.opacity(0.5), .white.opacity(0.1), accent.opacity(0.3)],
+                    colors: [.white.opacity(0.16), .white.opacity(0.06), accent.opacity(0.1)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
                 lineWidth: 1
             )
         }
-        .overlay(alignment: .top) {
-            Capsule()
-                .fill(.white.opacity(0.28))
-                .frame(width: 150, height: 1)
-                .padding(.top, 2)
-        }
-        .shadow(color: accent.opacity(0.18), radius: 30, y: 12)
-        .shadow(color: .black.opacity(0.34), radius: 24, y: 14)
-        .padding(6)
+        .shadow(color: .black.opacity(0.28), radius: 14, y: 8)
+        .padding(4)
     }
 
     private var track: NowPlayingTrack {
@@ -102,6 +95,15 @@ struct LockScreenNowPlayingView: View {
 
     private var accent: Color {
         renderState.palette.swiftUIColors.first ?? .white
+    }
+
+    private var primaryControlForeground: Color {
+        let color = renderState.palette.accent
+        guard let rgb = color.usingColorSpace(.deviceRGB) else { return .black }
+        let luminance = 0.2126 * rgb.redComponent
+            + 0.7152 * rgb.greenComponent
+            + 0.0722 * rgb.blueComponent
+        return luminance > 0.58 ? .black : .white
     }
 
     private var subtitle: String {
@@ -113,8 +115,8 @@ struct LockScreenNowPlayingView: View {
     private var outputRoute: some View {
         Image(systemName: renderState.audioOutputRoute.kind.symbolName)
             .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .frame(width: 34, height: 34)
+            .foregroundStyle(.secondary)
+            .frame(width: 34, height: 34)
         .background(.thinMaterial, in: Circle())
         .overlay { Circle().stroke(.white.opacity(0.15), lineWidth: 1) }
         .help("Playing on \(renderState.audioOutputRoute.name)")
@@ -149,7 +151,7 @@ struct LockScreenNowPlayingView: View {
         } label: {
             Image(systemName: icon)
                 .font(.system(size: isPrimary ? 17 : 13, weight: .semibold))
-                .foregroundStyle(isPrimary ? Color.black : (isActive ? accent : Color.white))
+                .foregroundStyle(isPrimary ? primaryControlForeground : (isActive ? accent : Color.white))
                 .frame(width: isPrimary ? 44 : 34, height: isPrimary ? 44 : 34)
                 .background {
                     Circle().fill(isPrimary ? AnyShapeStyle(accent.opacity(0.96)) : AnyShapeStyle(.thinMaterial))

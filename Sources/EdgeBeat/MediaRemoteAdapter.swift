@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import OSLog
 
@@ -24,12 +25,20 @@ final class MediaRemoteAdapter {
     }
 
     private let logger = Logger(subsystem: "com.chaitanya.edgebeat", category: "media-remote")
+    private let processTimeout: TimeInterval
     private let scriptURL: URL?
     private let frameworkURL: URL?
 
     init(bundle: Bundle = .main) {
         scriptURL = bundle.url(forResource: "mediaremote-adapter", withExtension: "pl")
         frameworkURL = bundle.url(forResource: "MediaRemoteAdapter", withExtension: "framework")
+        processTimeout = 3
+    }
+
+    init(scriptURL: URL?, frameworkURL: URL?, processTimeout: TimeInterval) {
+        self.scriptURL = scriptURL
+        self.frameworkURL = frameworkURL
+        self.processTimeout = max(0.05, processTimeout)
     }
 
     var isAvailable: Bool {
@@ -49,9 +58,8 @@ final class MediaRemoteAdapter {
         }
         guard preferredSource == .automatic || preferredSource == source else { return nil }
 
-        let artwork = payload.artworkData
-            .flatMap { Data(base64Encoded: $0) }
-            .flatMap(NSImage.init(data:))
+        let artworkData = payload.artworkData.flatMap { Data(base64Encoded: $0) }
+        let artwork = artworkData.flatMap(NSImage.init(data:))
         let identifier = payload.uniqueIdentifier
             ?? payload.contentItemIdentifier
             ?? "\(source.rawValue)|\(title)|\(payload.artist ?? "")|\(payload.album ?? "")"
@@ -67,6 +75,7 @@ final class MediaRemoteAdapter {
             artist: payload.artist ?? "",
             album: payload.album ?? "",
             artwork: artwork,
+            artworkRevision: artworkData.map(ArtworkRevision.data) ?? "",
             identifier: identifier,
             state: payload.playing == true ? .playing : .paused,
             processID: processID,
@@ -87,8 +96,20 @@ final class MediaRemoteAdapter {
         return runVoid(arguments: ["send", commandID])
     }
 
+    func setPlayback(playing: Bool) -> Bool {
+        // MediaRemote exposes idempotent play/pause commands (0/1). Using
+        // those instead of toggle (2) prevents a delayed poll from reversing
+        // a user's most recent action.
+        runVoid(arguments: ["send", playing ? "0" : "1"])
+    }
+
     func setShuffle(enabled: Bool) -> Bool {
         runVoid(arguments: ["shuffle", enabled ? "1" : "0"])
+    }
+
+    func seek(to position: TimeInterval) -> Bool {
+        let microseconds = Int64((max(0, position) * 1_000_000).rounded())
+        return runVoid(arguments: ["seek", String(microseconds)])
     }
 
     private func estimatedElapsedTime(from payload: Payload) -> TimeInterval {
@@ -106,9 +127,11 @@ final class MediaRemoteAdapter {
         process.arguments = [scriptURL.path, frameworkURL.path] + arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        let termination = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in termination.signal() }
         do {
             try process.run()
-            process.waitUntilExit()
+            guard waitForExit(process, signal: termination) else { return false }
         } catch {
             logger.error("MediaRemote command could not start: \(error.localizedDescription, privacy: .public)")
             return false
@@ -124,15 +147,47 @@ final class MediaRemoteAdapter {
         process.arguments = [scriptURL.path, frameworkURL.path] + arguments
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
+        let termination = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in termination.signal() }
+        let outputGroup = DispatchGroup()
+        var outputData = Data()
+        let outputLock = NSLock()
         do {
             try process.run()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
+            outputGroup.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                outputLock.lock()
+                outputData = data
+                outputLock.unlock()
+                outputGroup.leave()
+            }
+            guard waitForExit(process, signal: termination) else { return nil }
+            _ = outputGroup.wait(timeout: .now() + 0.5)
+            outputLock.lock()
+            let data = outputData
+            outputLock.unlock()
             guard process.terminationStatus == 0 else { return nil }
             return try? JSONDecoder().decode(T.self, from: data)
         } catch {
             logger.error("MediaRemote query could not start: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    private func waitForExit(_ process: Process,
+                             signal: DispatchSemaphore) -> Bool {
+        guard signal.wait(timeout: .now() + processTimeout) == .timedOut else {
+            return process.terminationStatus == 0
+        }
+
+        logger.error("MediaRemote helper timed out")
+        if process.isRunning { process.terminate() }
+        if signal.wait(timeout: .now() + 0.25) == .timedOut,
+           process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
+            _ = signal.wait(timeout: .now() + 0.5)
+        }
+        return false
     }
 }

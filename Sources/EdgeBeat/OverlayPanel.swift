@@ -20,7 +20,7 @@ final class OverlayPanel: NSPanel {
         displayNotch = DisplayNotch(screen: screen)
         super.init(
             contentRect: screen.frame,
-            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -85,7 +85,7 @@ private final class LockScreenCardPanel: NSPanel {
         let frame = Self.cardFrame(on: screen)
         super.init(
             contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )

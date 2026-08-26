@@ -18,11 +18,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let beatAnalyzer: BeatAnalyzer? = BeatAnalyzer()
     private let updateChecker = GitHubUpdateChecker()
     private let displaySleepController = DisplaySleepController()
+    private lazy var companionWindow = CompanionWindowController(
+        renderState: renderState,
+        onPlaybackCommand: { [weak self] command, source in
+            self?.nowPlaying.perform(command, for: source)
+        },
+        onSeek: { [weak self] position, source in
+            self?.nowPlaying.seek(to: position, for: source)
+        }
+    )
     private var menuBar: MenuBarController?
     private var currentTrack = NowPlayingTrack.empty
     private var isAudioCaptureRequested = false
     private var requestedAudioProcessID: pid_t?
+    private var audioSessionGeneration = GenerationCounter()
     private var areDisplaysAsleep = false
+    private var isCompanionVisible = false
+    private var isTerminating = false
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -37,11 +49,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
         nowPlaying.stop()
         audioOutputMonitor.stop()
+        invalidateAudioSession()
         audioTap.stop()
         renderState.setWaveFlowAnimationActive(false)
         displaySleepController.setPrevented(false)
+        companionWindow.close()
     }
 
     private func configureMenuBar() {
@@ -62,7 +77,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.onCheckForUpdates = { [weak self] in
             self?.checkForUpdates()
         }
+        menuBar.onToggleCompanion = { [weak self] in
+            self?.companionWindow.toggle()
+        }
+        companionWindow.onVisibilityChange = { [weak self] visible in
+            guard let self else { return }
+            isCompanionVisible = visible
+            menuBar.setCompanionVisible(visible)
+            guard !isTerminating else { return }
+            syncAudioCapture()
+            syncDisplaySleepPrevention()
+        }
         menuBar.setLaunchAtLogin(SMAppService.mainApp.status == .enabled)
+        menuBar.setCompanionVisible(companionWindow.isVisible)
         self.menuBar = menuBar
     }
 
@@ -80,13 +107,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             syncWaveFlowAnimation()
             syncDisplaySleepPrevention()
         }
-        beatAnalyzer?.onFeatures = { [weak self] features in
+        beatAnalyzer?.onFeatures = { [weak self] features, session in
             guard let self,
-                  preferences.enabled else { return }
+                  audioSessionGeneration.matches(session),
+                  preferences.enabled || isCompanionVisible else { return }
             renderState.update(audio: features)
         }
-        audioTap.onSamples = { [weak self] samples, sampleRate in
-            self?.beatAnalyzer?.consume(samples: samples, sampleRate: sampleRate)
+        audioTap.onSamples = { [weak self] samples, sampleRate, session in
+            self?.beatAnalyzer?.consume(
+                samples: samples,
+                sampleRate: sampleRate,
+                session: session
+            )
         }
         audioTap.onStatusChange = { [weak self] message in
             DispatchQueue.main.async { self?.menuBar?.setCaptureStatus(message) }
@@ -148,24 +180,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func syncAudioCapture() {
-        let shouldCapture = preferences.enabled
+        let shouldCapture = (preferences.enabled || isCompanionVisible)
             && currentTrack.state == .playing
             && !areDisplaysAsleep
 
         if shouldCapture {
             guard !isAudioCaptureRequested
                     || requestedAudioProcessID != currentTrack.processID else { return }
+            if isAudioCaptureRequested {
+                renderState.resetAudio()
+            }
             isAudioCaptureRequested = true
             requestedAudioProcessID = currentTrack.processID
-            audioTap.start(processID: currentTrack.processID)
+            let session = audioSessionGeneration.next()
+            beatAnalyzer?.beginSession(session)
+            audioTap.start(processID: currentTrack.processID, session: session)
         } else {
             guard isAudioCaptureRequested else { return }
             isAudioCaptureRequested = false
             requestedAudioProcessID = nil
+            invalidateAudioSession()
             audioTap.stop()
-            renderState.update(audio: .silence)
+            renderState.resetAudio()
             menuBar?.setCaptureStatus(nil)
         }
+    }
+
+    private func invalidateAudioSession() {
+        let endingSession = audioSessionGeneration.current
+        audioSessionGeneration.invalidate()
+        beatAnalyzer?.endSession(endingSession)
     }
 
     private func applyPowerPolicy() {
@@ -201,9 +245,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func syncDisplaySleepPrevention() {
-        let shouldPrevent = preferences.enabled
+        let lockScreenPlayback = preferences.enabled
             && preferences.nowPlayingCardEnabled
             && preferences.isScreenLocked
+        let shouldPrevent = (lockScreenPlayback || isCompanionVisible)
             && currentTrack.state == .playing
             && !areDisplaysAsleep
         displaySleepController.setPrevented(shouldPrevent)

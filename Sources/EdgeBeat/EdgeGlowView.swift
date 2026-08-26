@@ -35,7 +35,7 @@ struct EdgeGlowView: View {
     }
 
     private var glow: some View {
-        let idle = renderState.isPlaying ? 0.14 : 0.08
+        let idle = renderState.isPlaying ? 0.14 : 0
         let audio = renderState.isPlaying ? renderState.level * 0.86 : 0
         let level = min(1, idle + audio + (renderState.beat ? 0.18 : 0))
         let waveform = renderState.waveform
@@ -73,18 +73,21 @@ struct EdgeGlowView: View {
                                  waveform: waveform, colors: glowColors,
                                  baseDepth: 15 * thicknessScale * beatBloom,
                                  waveDepth: waveDepth * 1.2 * thicknessScale,
-                                 blur: 20 * thicknessScale, opacity: 0.36 * glowOpacity)
+                                 blur: 20 * thicknessScale, opacity: 0.36 * glowOpacity,
+                                 includeTopBoundary: true)
                     drawWaveBand(context: &context, size: size, fields: fields,
                                  waveform: waveform, colors: glowColors,
                                  baseDepth: 7 * thicknessScale * beatBloom,
                                  waveDepth: waveDepth * 0.72 * thicknessScale,
-                                 blur: 7 * thicknessScale, opacity: 0.62 * glowOpacity)
+                                 blur: 7 * thicknessScale, opacity: 0.62 * glowOpacity,
+                                 includeTopBoundary: true)
                     drawWaveBand(context: &context, size: size, fields: fields,
                                  waveform: waveform, colors: glowColors,
                                  baseDepth: max(1, 2.2 * thicknessScale),
                                  waveDepth: waveDepth * 0.24 * thicknessScale,
                                  blur: max(0.6, 1.2 * thicknessScale),
-                                 opacity: 0.94 * glowOpacity)
+                                 opacity: 0.94 * glowOpacity,
+                                 includeTopBoundary: true)
                 }
                 .blendMode(.screen)
             }
@@ -196,20 +199,23 @@ struct EdgeGlowView: View {
 
     private func drawWaveBand(context: inout GraphicsContext, size: CGSize, fields: [EdgeField],
                               waveform: [Double], colors: [Color], baseDepth: CGFloat,
-                              waveDepth: CGFloat, blur: CGFloat, opacity: Double) {
+                              waveDepth: CGFloat, blur: CGFloat, opacity: Double,
+                              includeTopBoundary: Bool) {
         guard !colors.isEmpty else { return }
         context.drawLayer { layer in
             layer.opacity = opacity
             if blur > 0 { layer.addFilter(.blur(radius: blur)) }
-            layer.fill(topWaveBandPath(in: size, waveform: waveform,
-                                       baseDepth: baseDepth, waveDepth: waveDepth),
-                       with: .linearGradient(
-                        Gradient(colors: [colors[0], colors[min(1, colors.count - 1)]]),
-                        startPoint: .zero,
-                        endPoint: CGPoint(x: size.width, y: 0)
-                       ))
+            if includeTopBoundary {
+                layer.fill(topWaveBandPath(in: size, waveform: waveform,
+                                           baseDepth: baseDepth, waveDepth: waveDepth),
+                           with: .linearGradient(
+                            Gradient(colors: [colors[0], colors[min(1, colors.count - 1)]]),
+                            startPoint: .zero,
+                            endPoint: CGPoint(x: size.width, y: 0)
+                           ))
+            }
             for field in fields {
-                let path = waveBandPath(for: field, waveform: waveform,
+                let path = waveBandPath(for: field, in: size, waveform: waveform,
                                         baseDepth: baseDepth, waveDepth: waveDepth)
                 layer.fill(path, with: .linearGradient(
                     Gradient(colors: [colors[field.colorOffset % colors.count],
@@ -485,10 +491,13 @@ struct EdgeGlowView: View {
                                  baseDepth: CGFloat, waveDepth: CGFloat) -> Path {
         let samples = topBoundarySamples(in: size)
         guard samples.count > 1 else { return Path() }
+        let outerInset: CGFloat = 1
 
         return Path { path in
-            path.move(to: samples[0].point)
-            for sample in samples.dropFirst() { path.addLine(to: sample.point) }
+            path.move(to: topOuterPoint(samples[0], inset: outerInset, in: size))
+            for sample in samples.dropFirst() {
+                path.addLine(to: topOuterPoint(sample, inset: outerInset, in: size))
+            }
 
             for (index, sample) in samples.enumerated().reversed() {
                 let t = CGFloat(index) / CGFloat(samples.count - 1)
@@ -503,6 +512,18 @@ struct EdgeGlowView: View {
             }
             path.closeSubpath()
         }
+    }
+
+    private func topOuterPoint(_ sample: BoundarySample, inset: CGFloat,
+                               in size: CGSize) -> CGPoint {
+        let point = CGPoint(
+            x: sample.point.x + sample.normal.dx * inset,
+            y: sample.point.y + sample.normal.dy * inset
+        )
+        return CGPoint(
+            x: min(size.width - inset, max(inset, point.x)),
+            y: min(size.height - inset, max(inset, point.y))
+        )
     }
 
     private func topBoundarySamples(in size: CGSize) -> [BoundarySample] {
@@ -599,13 +620,16 @@ struct EdgeGlowView: View {
         }
     }
 
-    private func waveBandPath(for field: EdgeField, waveform: [Double],
+    private func waveBandPath(for field: EdgeField, in size: CGSize, waveform: [Double],
                               baseDepth: CGFloat, waveDepth: CGFloat) -> Path {
         let edgeLength = hypot(field.end.x - field.start.x, field.end.y - field.start.y)
         let pointCount = max(48, min(260, Int(edgeLength / 6)))
+        let boundaryInset: CGFloat = 1
         return Path { path in
-            path.move(to: field.start)
-            path.addLine(to: field.end)
+            path.move(to: boundaryPoint(field.start, on: field.edge,
+                                        by: boundaryInset, in: size))
+            path.addLine(to: boundaryPoint(field.end, on: field.edge,
+                                           by: boundaryInset, in: size))
             for index in stride(from: pointCount, through: 0, by: -1) {
                 let t = CGFloat(index) / CGFloat(pointCount)
                 let position = field.waveformRange.lowerBound
@@ -620,6 +644,22 @@ struct EdgeGlowView: View {
             }
             path.closeSubpath()
         }
+    }
+
+    private func boundaryPoint(_ point: CGPoint, on edge: Edge, by amount: CGFloat,
+                               in size: CGSize) -> CGPoint {
+        var result = point
+        switch edge {
+        case .top: result.y += amount
+        case .right: result.x -= amount
+        case .bottom: result.y -= amount
+        case .left: result.x += amount
+        }
+        let maxX = max(amount, size.width - amount)
+        let maxY = max(amount, size.height - amount)
+        result.x = min(maxX, max(amount, result.x))
+        result.y = min(maxY, max(amount, result.y))
+        return result
     }
 
     private func cornerFalloff(for edge: Edge, at position: CGFloat) -> CGFloat {
