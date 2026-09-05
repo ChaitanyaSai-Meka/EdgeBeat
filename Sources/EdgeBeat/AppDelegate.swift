@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureMenuBar()
         configurePlaybackPipeline()
         nowPlaying.setSource(preferences.playerSource)
+        renderState.setWaveFlowDirection(preferences.waveFlowDirection)
         observePreferences()
         applyPowerPolicy()
 
@@ -145,6 +146,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.$waveSpeed
             .removeDuplicates()
             .sink { [weak self] speed in self?.renderState.setWaveFlowSpeed(speed) }
+            .store(in: &cancellables)
+
+        preferences.$waveFlowDirection
+            .removeDuplicates()
+            .sink { [weak self] direction in self?.renderState.setWaveFlowDirection(direction) }
             .store(in: &cancellables)
 
         preferences.$displayTarget

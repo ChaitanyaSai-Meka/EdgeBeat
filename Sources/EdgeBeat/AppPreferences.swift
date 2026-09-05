@@ -43,6 +43,19 @@ enum WaveSpeedPreset: Int, CaseIterable {
     }
 }
 
+enum WaveFlowDirection: String, CaseIterable {
+    case clockwise = "Clockwise"
+    case counterclockwise = "Counterclockwise"
+
+    var phaseSign: Double {
+        self == .clockwise ? 1 : -1
+    }
+
+    var symbolName: String {
+        self == .clockwise ? "arrow.clockwise" : "arrow.counterclockwise"
+    }
+}
+
 final class AppPreferences: ObservableObject {
     @Published var enabled: Bool {
         didSet { defaults.set(enabled, forKey: Keys.enabled) }
@@ -78,6 +91,9 @@ final class AppPreferences: ObservableObject {
     @Published var waveSpeed: Double {
         didSet { defaults.set(waveSpeed, forKey: Keys.waveSpeed) }
     }
+    @Published var waveFlowDirection: WaveFlowDirection {
+        didSet { defaults.set(waveFlowDirection.rawValue, forKey: Keys.waveFlowDirection) }
+    }
     @Published var displayTarget: DisplayTarget {
         didSet { defaults.set(displayTarget.rawValue, forKey: Keys.displayTarget) }
     }
@@ -107,6 +123,9 @@ final class AppPreferences: ObservableObject {
         waveIntensity = defaults.object(forKey: Keys.waveIntensity) as? Double ?? 0.75
         let storedWaveSpeed = defaults.object(forKey: Keys.waveSpeed) as? Double ?? 0.6
         waveSpeed = WaveSpeedPreset.nearest(to: storedWaveSpeed).speed
+        waveFlowDirection = WaveFlowDirection(
+            rawValue: defaults.string(forKey: Keys.waveFlowDirection) ?? ""
+        ) ?? .clockwise
         displayTarget = DisplayTarget(rawValue: defaults.string(forKey: Keys.displayTarget) ?? "") ?? .builtIn
         nowPlayingCardEnabled = defaults.object(forKey: Keys.nowPlayingCardEnabled) as? Bool ?? false
         playerSource = PlayerSource(rawValue: defaults.string(forKey: Keys.playerSource) ?? "") ?? .automatic
@@ -139,6 +158,7 @@ final class AppPreferences: ObservableObject {
         static let waveLength = "waveFlow.length"
         static let waveIntensity = "waveFlow.intensity"
         static let waveSpeed = "waveFlow.speed"
+        static let waveFlowDirection = "waveFlow.direction"
         static let displayTarget = "display.target"
         static let nowPlayingCardEnabled = "nowPlaying.cardEnabled"
         static let playerSource = "player.source"

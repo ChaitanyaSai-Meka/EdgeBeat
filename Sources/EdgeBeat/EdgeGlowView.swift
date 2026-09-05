@@ -38,15 +38,22 @@ struct EdgeGlowView: View {
         let idle = renderState.isPlaying ? 0.14 : 0
         let audio = renderState.isPlaying ? renderState.level * 0.86 : 0
         let level = min(1, idle + audio + (renderState.beat ? 0.18 : 0))
+        // Keep the regular glow clearly visible between beats while preserving
+        // the existing audio-driven range and maximum brightness.
+        let normalGlowBoost = 0.28
+        let normalGlowLevel = renderState.isPlaying
+            ? min(1, level + normalGlowBoost)
+            : 0
         let waveform = renderState.waveform
         let waveDepth = CGFloat(7 + renderState.level * 17 + (renderState.beat ? 5 : 0))
         let beatBloom: CGFloat = renderState.beat ? 1.12 : 1
 
-        let baseGlowOpacity = level * preferences.intensity
+        let baseGlowOpacity = normalGlowLevel * preferences.intensity
         let thicknessScale = CGFloat(0.3 + preferences.thickness * 1.7)
         let waveFlow: WaveFlowParameters? = preferences.waveFlowEnabled && renderState.isPlaying
             ? WaveFlowParameters(
                 phase: renderState.waveFlowPhase,
+                direction: preferences.waveFlowDirection,
                 segmentLength: min(
                     0.62,
                     0.08 + preferences.waveLength * 0.44
@@ -166,6 +173,7 @@ struct EdgeGlowView: View {
 
     private struct WaveFlowParameters {
         let phase: Double
+        let direction: WaveFlowDirection
         let segmentLength: Double
     }
 
@@ -297,8 +305,11 @@ struct EdgeGlowView: View {
     ) -> [WaveFlowPoint] {
         guard perimeter.count > 1 else { return [] }
         let segmentLength = max(0.04, parameters.segmentLength)
-        let lower = parameters.phase - segmentLength
-        let upper = parameters.phase
+        let direction = parameters.direction.phaseSign
+        let head = parameters.phase
+        let tail = head - direction * segmentLength
+        let lower = min(tail, head)
+        let upper = max(tail, head)
         var run: [(sample: PerimeterSample, position: Double)] = []
 
         for sample in perimeter {
@@ -309,16 +320,18 @@ struct EdgeGlowView: View {
                 }
             }
         }
-        run.sort { $0.position < $1.position }
+        run.sort {
+            direction > 0 ? $0.position < $1.position : $0.position > $1.position
+        }
         guard !run.isEmpty else { return [] }
 
         var points: [(sample: PerimeterSample, position: Double)] = []
-        points.append(interpolatedPerimeterSample(perimeter, at: lower))
+        points.append(interpolatedPerimeterSample(perimeter, at: tail))
         points.append(contentsOf: run.filter { $0.position > lower && $0.position < upper })
-        points.append(interpolatedPerimeterSample(perimeter, at: upper))
+        points.append(interpolatedPerimeterSample(perimeter, at: head))
 
         return points.map { entry in
-            let progress = CGFloat((entry.position - lower) / segmentLength)
+            let progress = CGFloat((entry.position - tail) * direction / segmentLength)
             return WaveFlowPoint(
                 point: insetPoint(entry.sample, by: inset),
                 normal: entry.sample.normal,

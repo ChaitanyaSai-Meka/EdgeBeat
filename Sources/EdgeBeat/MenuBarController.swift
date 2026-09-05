@@ -83,7 +83,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var waveLengthItem: NSMenuItem!
     private var waveIntensityItem: NSMenuItem!
     private var waveSpeedItem: NSMenuItem!
+    private var waveDirectionItem: NSMenuItem!
     private var waveControlsSeparatorItem: NSMenuItem!
+    private var waveDirectionItems: [WaveFlowDirection: NSMenuItem] = [:]
 
     var onQuit: (() -> Void)?
     var onSourceChange: ((PlayerSource) -> Void)?
@@ -269,6 +271,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         submenu.addItem(waveFlowItem)
         waveControlsSeparatorItem = .separator()
         submenu.addItem(waveControlsSeparatorItem)
+        waveDirectionItem = makeWaveDirectionMenu()
+        submenu.addItem(waveDirectionItem)
 
         waveLengthItem = makeSliderItem(
             title: "Wave Length",
@@ -288,6 +292,26 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         submenu.addItem(waveIntensityItem)
         waveSpeedItem = makeWaveSpeedSliderItem()
         submenu.addItem(waveSpeedItem)
+
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func makeWaveDirectionMenu() -> NSMenuItem {
+        let parent = NSMenuItem(title: "Direction", action: nil, keyEquivalent: "")
+        parent.image = symbol("arrow.triangle.2.circlepath")
+        let submenu = NSMenu(title: "Direction")
+
+        for direction in WaveFlowDirection.allCases {
+            let item = commandItem(
+                direction.rawValue,
+                action: #selector(waveDirectionChanged(_:)),
+                icon: direction.symbolName
+            )
+            item.representedObject = direction.rawValue
+            waveDirectionItems[direction] = item
+            submenu.addItem(item)
+        }
 
         parent.submenu = submenu
         return parent
@@ -510,6 +534,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         waveSpeedValueLabel?.stringValue = preset.title
     }
 
+    @objc private func waveDirectionChanged(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let direction = WaveFlowDirection(rawValue: raw) else { return }
+        preferences.waveFlowDirection = direction
+        syncMenuState()
+    }
+
     @objc private func displayChanged(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let target = DisplayTarget(rawValue: raw) else { return }
@@ -561,6 +592,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         waveLengthItem?.isHidden = !showWaveControls
         waveIntensityItem?.isHidden = !showWaveControls
         waveSpeedItem?.isHidden = !showWaveControls
+        waveDirectionItem?.isHidden = !showWaveControls
+        waveDirectionItems.forEach { direction, item in
+            item.state = direction == preferences.waveFlowDirection ? .on : .off
+        }
         colorSourceItems.forEach { $0.value.state = $0.key == preferences.colorSource ? .on : .off }
         colorModeItems.forEach { key, item in
             item.state = key == preferences.colorMode ? .on : .off

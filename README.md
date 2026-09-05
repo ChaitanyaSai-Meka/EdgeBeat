@@ -24,6 +24,7 @@ Current version: `1.2.0`
 - Full-screen app and multi-Space support
 - Lock-screen artwork, progress, and playback controls
 - Separate Now Playing window with artwork, progress, playback controls, and full-screen mode
+- On-demand lyrics lookup in the Now Playing window
 - Persistent settings and optional Launch at Login
 - Adaptive refresh rates that respect macOS Low Power Mode and display sleep
 - Menu-bar-only operation with no Dock icon
@@ -46,20 +47,22 @@ MediaRemoteAdapter framework includes both Apple Silicon and Intel architectures
    [EdgeBeat Releases](https://github.com/ChaitanyaSai-Meka/EdgeBeat/releases) page.
 2. Double-click `EdgeBeat.zip` in Finder to extract `EdgeBeat.app`.
 3. Move `EdgeBeat.app` to the Applications folder.
-4. Open Terminal, type `xattr -r -c`, add a space, and drag `EdgeBeat.app` from
-   the Applications folder into the Terminal window. Press Return to run the
-   completed command:
+4. Open `EdgeBeat.app` from the Applications folder. Because the release is
+   ad-hoc signed and is not notarized by Apple, macOS may show a warning such as:
+   **"EdgeBeat.app" cannot be opened because the developer cannot be verified.**
+   Some macOS versions instead say that Apple cannot check the app for malicious
+   software. Click **Cancel** on that warning.
+5. Open **System Settings > Privacy & Security**, then scroll to the **Security**
+   section. You should see a message that EdgeBeat was blocked because it is not
+   from an identified developer. Click **Open Anyway** and authenticate with
+   Touch ID or your Mac password if macOS asks.
+6. Open `EdgeBeat.app` from the Applications folder again and click **Open** in
+   the confirmation dialog.
 
-```sh
-xattr -r -c /Applications/EdgeBeat.app
-```
-
-5. Open `EdgeBeat.app` from the Applications folder. EdgeBeat runs in the menu
-   bar and does not display a Dock icon.
-
-The release uses an ad-hoc code signature and is not notarized by Apple. macOS may
-therefore quarantine the downloaded application. The `xattr` command clears those
-download attributes. Run it only for an archive downloaded from the official
+EdgeBeat runs in the menu bar and does not display a Dock icon. The exact warning
+text can vary slightly between macOS versions, but the **Open Anyway** control is
+available in **System Settings > Privacy & Security > Security** after the first
+launch attempt. Only bypass Gatekeeper for an archive downloaded from the official
 EdgeBeat repository.
 
 ### Build from Source
@@ -175,6 +178,7 @@ All controls are available from the waveform icon in the menu bar.
 | Glow | Adjusts the brightness of the soft edge glow |
 | Thickness | Adjusts the width and bloom of the edge lighting |
 | Wave > Wave Flow | Enables the single traveling perimeter light |
+| Wave > Direction | Selects clockwise or counterclockwise travel |
 | Wave > Wave Length | Controls how much of the perimeter the wave occupies |
 | Wave > Wave Intensity | Controls how solid and bright the wave appears |
 | Wave > Wave Speed | Selects a Slow, Medium, or Fast travel-speed preset |
@@ -192,9 +196,13 @@ area and is shown only on the main display.
 
 The companion Now Playing window provides a larger listening view with album
 artwork, track metadata, progress, shuffle, previous, play/pause, next, and
-output-device controls. Use the full-screen button in the window header or the
-standard macOS green window control to enter full screen. The companion remains
-connected to the same Spotify or Apple Music monitor as the menu-bar and
+output-device controls. Select the Lyrics button in the window header to request
+and display lyrics for the current track in a side panel beside the artwork.
+Timestamped lyrics highlight the current line and follow playback in the
+immersive layout. The panel becomes a stacked view automatically when the window
+is too narrow for both columns. Use the full-screen button in the window header
+or the standard macOS green window control to enter full screen. The companion
+remains connected to the same Spotify or Apple Music monitor as the menu-bar and
 lock-screen controls. The native close and minimize buttons hide the window
 without stopping playback monitoring, and the controls remain available after
 entering or leaving macOS full screen.
@@ -216,12 +224,9 @@ To update an installed release:
 1. Quit EdgeBeat.
 2. Download and extract the latest `EdgeBeat.zip` from the release page.
 3. Replace the existing application in the Applications folder.
-4. Run the quarantine-clearing command again before opening the new version:
-
-```sh
-xattr -r -c /Applications/EdgeBeat.app
-open /Applications/EdgeBeat.app
-```
+4. Open the updated `EdgeBeat.app`. If macOS shows the developer-verification
+   warning, go to **System Settings > Privacy & Security**, scroll to **Security**,
+   click **Open Anyway**, and confirm **Open** when prompted.
 
 To update directly from source instead, run the following commands from the
 repository directory:
@@ -427,6 +432,8 @@ Important components:
 - Track metadata and artwork are used only to render the interface.
 - Spotify artwork may be downloaded from the artwork URL when the fallback path is
   active.
+- Lyrics are requested only when the Lyrics control is selected. The current
+  track title, artist, album, and duration are sent to LRCLIB for that lookup.
 - EdgeBeat does not upload listening history or captured audio.
 
 ## Compatibility Notes
@@ -445,6 +452,9 @@ the Mac App Store.
 EdgeBeat includes MediaRemoteAdapter by Jonas van den Berg and contributors. It is
 distributed under the BSD 3-Clause License. The complete notice is available in
 `Resources/MediaRemoteAdapter.LICENSE` and is copied into every application bundle.
+
+Lyrics lookup uses the public LRCLIB service. Lyrics availability depends on that
+service and its catalog; EdgeBeat does not bundle or cache a lyrics database.
 
 The lock-screen implementation was informed by the open-source
 [BoringNotch](https://github.com/TheBoredTeam/boring.notch) and

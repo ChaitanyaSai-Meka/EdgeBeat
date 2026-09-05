@@ -27,5 +27,5 @@ Initial open-source release of the EdgeBeat macOS menu-bar application.
 
 Release builds are published on the official
 [EdgeBeat Releases](https://github.com/ChaitanyaSai-Meka/EdgeBeat/releases) page.
-Follow the installation and quarantine-clearing instructions in the main
+Follow the Gatekeeper approval instructions in the main
 [README](README.md#installation) before opening a downloaded build.

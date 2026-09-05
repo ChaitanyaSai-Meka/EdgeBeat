@@ -12,11 +12,19 @@ struct CompanionNowPlayingView: View {
     @State private var pendingSeekTarget: TimeInterval?
     @State private var backdropImage: NSImage?
     @State private var backdropIdentifier = ""
+    @StateObject private var lyricsStore = LyricsStore()
+    @State private var showsLyrics = false
 
     private static let contentMaxWidth: CGFloat = 760
+    private static let lyricsContentMaxWidth: CGFloat = 1500
     private static let horizontalInset: CGFloat = 40
     private static let artworkMaxSide: CGFloat = 500
     private static let artworkMinSide: CGFloat = 150
+    private static let sideArtworkMaxSide: CGFloat = 460
+    private static let sideLyricsMinWidth: CGFloat = 860
+    private static let sideLyricsMinHeight: CGFloat = 560
+    private static let sideLyricsSpacing: CGFloat = 40
+    private static let sideLyricsMaxWidth: CGFloat = 680
     private static let headerHeight: CGFloat = 78
     private static let controlsHeight: CGFloat = 112
     private static let metadataHeight: CGFloat = 180
@@ -71,10 +79,17 @@ struct CompanionNowPlayingView: View {
             pendingSeekTarget = nil
             updateBackdrop()
         }
-        .onChange(of: track.artwork != nil) { _, _ in
+        .onChange(of: track.artworkRevision) { _, _ in
             updateBackdrop()
         }
-        .onAppear { updateBackdrop() }
+        .onChange(of: lyricsRequestKey) { _, _ in
+            guard showsLyrics else { return }
+            loadLyrics()
+        }
+        .onAppear {
+            updateBackdrop()
+            if showsLyrics { loadLyrics() }
+        }
     }
 
     private var track: NowPlayingTrack {
@@ -93,6 +108,16 @@ struct CompanionNowPlayingView: View {
         canControlPlayback && track.duration > 0
     }
 
+    private var canLoadLyrics: Bool {
+        canControlPlayback
+            && !track.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !track.artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var lyricsRequestKey: String {
+        [track.identifier, track.title, track.artist, track.album].joined(separator: "|")
+    }
+
     private var background: some View {
         ZStack {
             Color(nsColor: renderState.palette.background)
@@ -102,24 +127,55 @@ struct CompanionNowPlayingView: View {
                 Image(nsImage: backdropImage)
                     .resizable()
                     .scaledToFill()
-                    .blur(radius: 48)
-                    .opacity(0.22)
+                    .blur(radius: showsLyrics ? 72 : 48)
+                    .opacity(showsLyrics ? 0.42 : 0.16)
                     .ignoresSafeArea()
             }
 
-            Color.black.opacity(0.58)
+            Color.black.opacity(showsLyrics ? 0.64 : 0.94)
                 .ignoresSafeArea()
+
+            if showsLyrics {
+                LinearGradient(
+                    colors: [
+                        .black.opacity(0.42),
+                        .black.opacity(0.12),
+                        .black.opacity(0.52)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .ignoresSafeArea()
+            }
         }
     }
 
     private func updateBackdrop() {
-        guard backdropIdentifier != track.identifier || backdropImage == nil else { return }
-        backdropIdentifier = track.identifier
+        guard backdropIdentifier != backdropKey || backdropImage == nil else { return }
+        backdropIdentifier = backdropKey
         guard let artwork = track.artwork else {
             backdropImage = nil
             return
         }
         backdropImage = Self.makeBackdropImage(from: artwork)
+    }
+
+    private var backdropKey: String {
+        track.identifier + "|" + track.artworkRevision
+    }
+
+    private func loadLyrics(force: Bool = false) {
+        guard canLoadLyrics else {
+            lyricsStore.reset()
+            return
+        }
+        lyricsStore.load(
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration: track.duration,
+            force: force
+        )
     }
 
     private static func makeBackdropImage(from artwork: NSImage) -> NSImage? {
@@ -154,7 +210,10 @@ struct CompanionNowPlayingView: View {
             Spacer()
 
             if track.state != .unavailable {
-                routeSummary
+                HStack(spacing: 10) {
+                    lyricsToggle
+                    routeSummary
+                }
             }
         }
         .padding(.horizontal, 34)
@@ -191,6 +250,33 @@ struct CompanionNowPlayingView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private var lyricsToggle: some View {
+        Button {
+            showsLyrics.toggle()
+            if showsLyrics { loadLyrics() }
+        } label: {
+            Image(systemName: showsLyrics ? "music.note.list" : "text.quote")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(showsLyrics ? accent : Color.secondary)
+                .frame(width: 34, height: 34)
+                .background {
+                    Circle().fill(showsLyrics ? accent.opacity(0.2) : Color.white.opacity(0.06))
+                }
+                .overlay {
+                    Circle().stroke(
+                        showsLyrics ? accent.opacity(0.7) : Color.white.opacity(0.14),
+                        lineWidth: 1
+                    )
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(showsLyrics ? "Hide Lyrics" : "Show Lyrics")
+        .accessibilityLabel(showsLyrics ? "Hide Lyrics" : "Show Lyrics")
+        .disabled(!canLoadLyrics)
+        .opacity(canLoadLyrics ? 1 : 0.45)
+    }
+
     private var routeSummary: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 7) {
@@ -208,30 +294,66 @@ struct CompanionNowPlayingView: View {
         .accessibilityLabel("Playing on \(renderState.audioOutputRoute.name)")
     }
 
+    @ViewBuilder
     private func playerLayout(in size: CGSize) -> some View {
         let playerHeight = max(0, size.height - Self.headerHeight)
         let metrics = layoutMetrics(for: playerHeight)
+        let maxContentWidth = showsLyrics ? Self.lyricsContentMaxWidth : Self.contentMaxWidth
         let columnWidth = min(
-            Self.contentMaxWidth,
+            maxContentWidth,
             max(0, size.width - Self.horizontalInset * 2)
         )
+        let usesSideLyrics = showsLyrics
+            && !metrics.isCompact
+            && columnWidth >= Self.sideLyricsMinWidth
+            && playerHeight >= Self.sideLyricsMinHeight
+
+        if usesSideLyrics {
+            sideLyricsLayout(
+                width: columnWidth,
+                height: playerHeight,
+                metrics: metrics
+            )
+            .frame(width: columnWidth, height: playerHeight)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .transition(.opacity.combined(with: .move(edge: .trailing)))
+        } else {
+            standardPlayerLayout(
+                width: columnWidth,
+                height: playerHeight,
+                metrics: metrics
+            )
+            .transition(.opacity.combined(with: showsLyrics ? .move(edge: .top) : .identity))
+        }
+    }
+
+    private func standardPlayerLayout(
+        width: CGFloat,
+        height: CGFloat,
+        metrics: LayoutMetrics
+    ) -> some View {
         let artworkAvailableHeight = max(
             metrics.artworkMinSide,
-            playerHeight - metrics.controlsHeight - metrics.metadataHeight - metrics.progressHeight
+            height - metrics.controlsHeight - metrics.metadataHeight - metrics.progressHeight
         )
         let artworkSide = min(
             Self.artworkMaxSide,
-            max(metrics.artworkMinSide, min(columnWidth, artworkAvailableHeight))
+            max(metrics.artworkMinSide, min(width, artworkAvailableHeight))
         )
 
         return VStack(spacing: 0) {
             Spacer(minLength: 0)
 
-            artworkView(size: artworkSide)
+            if showsLyrics {
+                lyricsPanel
+                    .frame(height: artworkSide + metrics.metadataHeight)
+            } else {
+                artworkView(size: artworkSide)
 
-            metadata(isCompact: metrics.isCompact)
-                .padding(.top, metrics.isCompact ? 10 : 18)
-                .frame(height: metrics.metadataHeight, alignment: .top)
+                metadata(isCompact: metrics.isCompact)
+                    .padding(.top, metrics.isCompact ? 10 : 18)
+                    .frame(height: metrics.metadataHeight, alignment: .top)
+            }
 
             progress
                 .frame(height: metrics.progressHeight)
@@ -241,7 +363,112 @@ struct CompanionNowPlayingView: View {
             controls(isCompact: metrics.isCompact)
                 .frame(height: metrics.controlsHeight, alignment: .top)
         }
-        .frame(width: columnWidth, height: playerHeight)
+        .frame(width: width, height: height)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .animation(.easeInOut(duration: 0.24), value: showsLyrics)
+    }
+
+    private func sideLyricsLayout(
+        width: CGFloat,
+        height: CGFloat,
+        metrics: LayoutMetrics
+    ) -> some View {
+        let lyricsWidth = min(Self.sideLyricsMaxWidth, max(380, width * 0.46))
+        let artworkColumnWidth = max(0, width - lyricsWidth - Self.sideLyricsSpacing)
+        let metadataHeight = min(metrics.metadataHeight, 154)
+        let controlsHeight = min(metrics.controlsHeight, 96)
+        let progressHeight = min(metrics.progressHeight, 58)
+        let artworkAvailableHeight = max(
+            metrics.artworkMinSide,
+            height - metadataHeight - controlsHeight - progressHeight - 24
+        )
+        let artworkSide = min(
+            Self.sideArtworkMaxSide,
+            max(
+                metrics.artworkMinSide,
+                min(artworkColumnWidth, artworkAvailableHeight)
+            )
+        )
+
+        return HStack(alignment: .top, spacing: Self.sideLyricsSpacing) {
+            sidePlaybackColumn(
+                width: artworkColumnWidth,
+                height: height,
+                artworkSide: artworkSide,
+                metadataHeight: metadataHeight,
+                controlsHeight: controlsHeight,
+                progressHeight: progressHeight
+            )
+
+            sideLyricsView
+                .frame(width: lyricsWidth, height: height)
+        }
+    }
+
+    private func sidePlaybackColumn(
+        width: CGFloat,
+        height: CGFloat,
+        artworkSide: CGFloat,
+        metadataHeight: CGFloat,
+        controlsHeight: CGFloat,
+        progressHeight: CGFloat
+    ) -> some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            artworkView(size: artworkSide, cornerRadius: 16)
+
+            metadata(isCompact: false, showsWaveform: false, leading: true)
+                .padding(.top, 16)
+                .frame(height: metadataHeight, alignment: .top)
+
+            progress
+                .frame(height: progressHeight)
+
+            sideControls
+                .frame(height: controlsHeight, alignment: .top)
+        }
+        .frame(width: width, height: height)
+    }
+
+    private var sideControls: some View {
+        HStack(spacing: 22) {
+            controlButton(
+                .toggleShuffle,
+                icon: "shuffle",
+                label: track.isShuffleEnabled ? "Turn Shuffle Off" : "Turn Shuffle On",
+                isActive: track.isShuffleEnabled,
+                isCompact: true
+            )
+
+            HStack(spacing: 18) {
+                controlButton(
+                    .previousTrack,
+                    icon: "backward.fill",
+                    label: "Previous",
+                    isCompact: true
+                )
+                controlButton(
+                    .togglePlayPause,
+                    icon: track.state == .playing ? "pause.fill" : "play.fill",
+                    label: track.state == .playing ? "Pause" : "Play",
+                    isPrimary: true,
+                    isCompact: true
+                )
+                controlButton(
+                    .nextTrack,
+                    icon: "forward.fill",
+                    label: "Next",
+                    isCompact: true
+                )
+            }
+
+            utilityButton(
+                icon: "ellipsis.circle",
+                label: "Copy Track Info",
+                action: copyTrackInfo
+            )
+        }
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
@@ -272,22 +499,325 @@ struct CompanionNowPlayingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var lyricsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.quote")
+                    .foregroundStyle(accent)
+                Text("Lyrics")
+                    .font(.system(size: 15, weight: .semibold))
+
+                Spacer()
+            }
+
+            lyricsContent
+
+            Text("Lyrics provided by LRCLIB")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        }
+    }
+
+    private var sideLyricsView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.quote")
+                    .foregroundStyle(accent)
+
+                Text("Lyrics")
+                    .font(.system(size: 15, weight: .semibold))
+
+                Spacer()
+
+                Text("SYNCED")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(accent.opacity(0.13), in: Capsule())
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 17)
+            .padding(.bottom, 12)
+
+            Rectangle()
+                .fill(.white.opacity(0.09))
+                .frame(height: 1)
+                .padding(.horizontal, 20)
+
+            ZStack {
+                sideLyricsContent
+                    .mask {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: .black, location: 0.11),
+                                .init(color: .black, location: 0.88),
+                                .init(color: .clear, location: 1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
+
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [.black.opacity(0.2), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 34)
+
+                    Spacer(minLength: 0)
+
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.28)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 40)
+                }
+                .allowsHitTesting(false)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                Text("Lyrics by LRCLIB")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.34))
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 13)
+            }
+        }
+        .background(.ultraThinMaterial.opacity(0.34), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.13), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+
     @ViewBuilder
-    private func artworkView(size: CGFloat) -> some View {
+    private var sideLyricsContent: some View {
+        switch lyricsStore.state {
+        case .idle:
+            lyricsStatus(
+                icon: "text.quote",
+                title: "Lyrics are not loaded",
+                detail: "Open the lyrics button to look up this track."
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loading:
+            VStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Loading lyrics...")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .loaded(document):
+            lyricsDocumentViewport(document, compact: false)
+        case .unavailable:
+            VStack(spacing: 12) {
+                lyricsStatus(
+                    icon: "text.badge.xmark",
+                    title: "Lyrics unavailable",
+                    detail: "No lyrics were found for this track."
+                )
+                retryLyricsButton
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failed(message):
+            VStack(spacing: 12) {
+                lyricsStatus(
+                    icon: "wifi.exclamationmark",
+                    title: "Lyrics could not be loaded",
+                    detail: message
+                )
+                retryLyricsButton
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func lyricsDocumentViewport(
+        _ document: LyricsDocument,
+        compact: Bool
+    ) -> some View {
+        if document.isInstrumental {
+            instrumentalLyricsView(compact: compact)
+        } else if document.isSynced {
+            if track.state == .playing {
+                TimelineView(.periodic(from: .now, by: tickInterval)) { context in
+                    SyncedLyricsViewport(
+                        lines: document.visibleLines,
+                        position: resolvedPosition(at: context.date),
+                        duration: track.duration,
+                        accent: accent,
+                        compact: compact,
+                        trackIdentifier: track.identifier,
+                        onSeek: seekToLyric
+                    )
+                }
+            } else {
+                SyncedLyricsViewport(
+                    lines: document.visibleLines,
+                    position: resolvedPosition(at: Date()),
+                    duration: track.duration,
+                    accent: accent,
+                    compact: compact,
+                    trackIdentifier: track.identifier,
+                    onSeek: seekToLyric
+                )
+            }
+        } else {
+            plainLyricsView(document, compact: compact)
+        }
+    }
+
+    private func plainLyricsView(
+        _ document: LyricsDocument,
+        compact: Bool
+    ) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: compact ? 12 : 15) {
+                ForEach(document.lines) { line in
+                    if line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Color.clear
+                            .frame(height: compact ? 8 : 14)
+                    } else {
+                        Text(line.text)
+                            .font(.system(size: compact ? 19 : 23, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineSpacing(compact ? 6 : 8)
+                            .multilineTextAlignment(.leading)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .padding(.horizontal, compact ? 12 : 18)
+            .padding(.vertical, compact ? 48 : 88)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func instrumentalLyricsView(compact: Bool) -> some View {
+        VStack(spacing: compact ? 12 : 16) {
+            Image(systemName: "music.note")
+                .font(.system(size: compact ? 26 : 34, weight: .medium))
+                .foregroundStyle(accent)
+                .symbolEffect(.pulse, isActive: track.state == .playing)
+
+            Text("Instrumental track")
+                .font(.system(size: compact ? 16 : 20, weight: .semibold))
+
+            Text("There are no lyrics for this recording.")
+                .font(.system(size: compact ? 12 : 13))
+                .foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+    }
+
+    @ViewBuilder
+    private var lyricsContent: some View {
+        switch lyricsStore.state {
+        case .idle:
+            VStack {
+                lyricsStatus(
+                    icon: "text.quote",
+                    title: "Lyrics are not loaded",
+                    detail: "Open the lyrics button to look up this track."
+                )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loading:
+            VStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Loading lyrics...")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .loaded(document):
+            lyricsDocumentViewport(document, compact: true)
+        case .unavailable:
+            VStack(spacing: 10) {
+                lyricsStatus(
+                    icon: "text.badge.xmark",
+                    title: "Lyrics unavailable",
+                    detail: "No lyrics were found for this track."
+                )
+                retryLyricsButton
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failed(message):
+            VStack(spacing: 10) {
+                lyricsStatus(
+                    icon: "wifi.exclamationmark",
+                    title: "Lyrics could not be loaded",
+                    detail: message
+                )
+                retryLyricsButton
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var retryLyricsButton: some View {
+        Button {
+            loadLyrics(force: true)
+        } label: {
+            Label("Try Again", systemImage: "arrow.clockwise")
+        }
+        .buttonStyle(.bordered)
+        .tint(accent)
+    }
+
+    private func lyricsStatus(icon: String, title: String, detail: String) -> some View {
+        VStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+            Text(detail)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func artworkView(size: CGFloat, cornerRadius: CGFloat = 24) -> some View {
         if let artwork = track.artwork {
             Image(nsImage: artwork)
                 .resizable()
                 .scaledToFit()
                 .frame(width: size, height: size)
                 .background(.black.opacity(0.24))
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .stroke(.white.opacity(0.22), lineWidth: 1)
                 }
                 .shadow(color: accent.opacity(0.42), radius: 34, y: 18)
         } else {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(.white.opacity(0.08))
                 .frame(width: size, height: size)
                 .overlay {
@@ -298,17 +828,28 @@ struct CompanionNowPlayingView: View {
         }
     }
 
-    private func metadata(isCompact: Bool) -> some View {
-        VStack(spacing: 7) {
-            liveWaveform
-                .frame(height: isCompact ? 24 : 34)
-                .padding(.bottom, isCompact ? 2 : 5)
+    private func metadata(
+        isCompact: Bool,
+        showsWaveform: Bool = true,
+        leading: Bool = false
+    ) -> some View {
+        let alignment: HorizontalAlignment = leading ? .leading : .center
+        let textAlignment: TextAlignment = leading ? .leading : .center
+        let frameAlignment: Alignment = leading ? .leading : .center
+
+        return VStack(alignment: alignment, spacing: 7) {
+            if showsWaveform {
+                liveWaveform
+                    .frame(height: isCompact ? 24 : 34)
+                    .padding(.bottom, isCompact ? 2 : 5)
+            }
 
             Text(track.title)
                 .font(.system(size: isCompact ? 27 : 34, weight: .bold))
                 .lineLimit(1)
                 .minimumScaleFactor(isCompact ? 0.6 : 0.68)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(textAlignment)
+                .frame(maxWidth: .infinity, alignment: frameAlignment)
                 .accessibilityAddTraits(.isHeader)
 
             Text(track.artist.isEmpty ? track.album : track.artist)
@@ -316,7 +857,8 @@ struct CompanionNowPlayingView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(textAlignment)
+                .frame(maxWidth: .infinity, alignment: frameAlignment)
 
             if !track.album.isEmpty, !track.artist.isEmpty {
                 Text(track.album)
@@ -324,6 +866,8 @@ struct CompanionNowPlayingView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
+                    .multilineTextAlignment(textAlignment)
+                    .frame(maxWidth: .infinity, alignment: frameAlignment)
             }
         }
         .frame(maxWidth: .infinity)
@@ -705,9 +1249,220 @@ struct CompanionNowPlayingView: View {
         onSeek(target, track.source)
     }
 
+    private func seekToLyric(_ timestamp: TimeInterval) {
+        guard canSeek, timestamp.isFinite else { return }
+        let target = min(track.duration, max(0, timestamp))
+        anchorPosition = target
+        anchorDate = Date()
+        pendingSeekTarget = target
+        onSeek(target, track.source)
+    }
+
     private func formatTime(_ value: TimeInterval) -> String {
         guard value.isFinite, value >= 0 else { return "0:00" }
         let totalSeconds = Int(value.rounded(.down))
+        return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
+    }
+}
+
+private struct SyncedLyricsViewport: View {
+    let lines: [LyricsLine]
+    let position: TimeInterval
+    let duration: TimeInterval
+    let accent: Color
+    let compact: Bool
+    let onSeek: (TimeInterval) -> Void
+    let trackIdentifier: String
+
+    @State private var lastFocusedID: Int?
+
+    init(
+        lines: [LyricsLine],
+        position: TimeInterval,
+        duration: TimeInterval,
+        accent: Color,
+        compact: Bool,
+        trackIdentifier: String = "",
+        onSeek: @escaping (TimeInterval) -> Void
+    ) {
+        self.lines = lines
+        self.position = position
+        self.duration = duration
+        self.accent = accent
+        self.compact = compact
+        self.trackIdentifier = trackIdentifier
+        self.onSeek = onSeek
+    }
+
+    var body: some View {
+        let activeIndex = LyricsTimeline.activeIndex(in: lines, at: position)
+        let activeID = activeIndex.map { lines[$0].id }
+        let focusID = activeID ?? lines.first?.id
+        let activeProgress = LyricsTimeline.progress(
+            in: lines,
+            activeIndex: activeIndex,
+            at: position,
+            duration: duration
+        )
+
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: compact ? 10 : 14) {
+                    ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+                        SyncedLyricRow(
+                            line: line,
+                            isActive: index == activeIndex,
+                            isPast: activeIndex.map { index < $0 } ?? false,
+                            distance: activeIndex.map { abs(index - $0) } ?? index,
+                            progress: index == activeIndex ? activeProgress : 0,
+                            accent: accent,
+                            compact: compact,
+                            onSeek: onSeek
+                        )
+                        .id(line.id)
+                    }
+                }
+                .padding(.horizontal, compact ? 10 : 16)
+                .padding(.vertical, compact ? 72 : 106)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: focusID, initial: true) { _, newID in
+                guard let newID, newID != lastFocusedID else { return }
+                lastFocusedID = newID
+                withAnimation(.easeInOut(duration: 0.34)) {
+                    proxy.scrollTo(newID, anchor: .center)
+                }
+            }
+        }
+        .id(trackIdentifier)
+    }
+}
+
+private struct SyncedLyricRow: View {
+    let line: LyricsLine
+    let isActive: Bool
+    let isPast: Bool
+    let distance: Int
+    let progress: Double
+    let accent: Color
+    let compact: Bool
+    let onSeek: (TimeInterval) -> Void
+
+    private var lineOpacity: Double {
+        guard !isActive else { return 1 }
+        let base = isPast ? 0.38 : 0.58
+        return max(0.22, base - Double(max(0, distance - 1)) * 0.09)
+    }
+
+    private var lineHeight: CGFloat {
+        compact ? 48 : 56
+    }
+
+    private var textStyle: AnyShapeStyle {
+        if isActive {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [.white, accent.opacity(0.92)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+        }
+        return AnyShapeStyle(Color.white.opacity(lineOpacity))
+    }
+
+    private var lyricText: some View {
+        Text(line.text)
+            .font(
+                .system(
+                    size: compact ? 20 : 24,
+                    weight: isActive ? .semibold : .medium
+                )
+            )
+            .foregroundStyle(textStyle)
+            .lineLimit(2)
+            .minimumScaleFactor(0.68)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: lineHeight, alignment: .leading)
+            .shadow(
+                color: isActive ? accent.opacity(0.36) : .clear,
+                radius: isActive ? 14 : 0
+            )
+    }
+
+    private var progressIndicator: some View {
+        Group {
+            if isActive {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.white.opacity(0.12))
+
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent.opacity(0.55), accent],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(
+                                width: max(10, proxy.size.width * CGFloat(progress))
+                            )
+                    }
+                }
+                .frame(height: 3)
+            } else {
+                Color.clear.frame(height: 3)
+            }
+        }
+    }
+
+    private var rowContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            lyricText
+            progressIndicator
+        }
+        .padding(.horizontal, isActive ? 12 : 0)
+        .padding(.vertical, 8)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(accent.opacity(0.09))
+            }
+        }
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(accent)
+                    .frame(width: 3, height: 28)
+                    .shadow(color: accent.opacity(0.6), radius: 8)
+            }
+        }
+        .scaleEffect(isActive ? 1.02 : (distance == 1 ? 1 : 0.98), anchor: .leading)
+        .opacity(lineOpacity)
+        .blur(radius: distance > 2 ? 0.35 : 0)
+        .animation(.easeInOut(duration: 0.24), value: isActive)
+        .animation(.easeInOut(duration: 0.24), value: lineOpacity)
+    }
+
+    var body: some View {
+        Button {
+            guard let timestamp = line.timestamp else { return }
+            onSeek(timestamp)
+        } label: {
+            rowContent
+        }
+        .buttonStyle(.plain)
+        .disabled(line.timestamp == nil)
+        .help(line.timestamp.map { "Jump to \(formatTimestamp($0))" } ?? "Lyrics")
+        .accessibilityLabel(line.text)
+        .accessibilityHint(line.timestamp == nil ? "" : "Jump to this line")
+    }
+
+    private func formatTimestamp(_ value: TimeInterval) -> String {
+        let totalSeconds = max(0, Int(value.rounded(.down)))
         return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
     }
 }
