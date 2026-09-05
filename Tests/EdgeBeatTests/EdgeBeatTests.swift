@@ -53,6 +53,33 @@ final class EdgeBeatTests: XCTestCase {
         XCTAssertNotEqual(first, second)
     }
 
+    func testLyricsTimelineTracksLineBoundaries() {
+        let lines = [
+            LyricsLine(id: 0, timestamp: 4, text: "First"),
+            LyricsLine(id: 1, timestamp: 9, text: "Second"),
+            LyricsLine(id: 2, timestamp: 15, text: "Third")
+        ]
+
+        XCTAssertNil(LyricsTimeline.activeIndex(in: lines, at: 3.99))
+        XCTAssertEqual(LyricsTimeline.activeIndex(in: lines, at: 4), 0)
+        XCTAssertEqual(LyricsTimeline.activeIndex(in: lines, at: 14.99), 1)
+        XCTAssertEqual(LyricsTimeline.activeIndex(in: lines, at: 15), 2)
+    }
+
+    func testLyricsDocumentOmitsBlankLinesFromPlaybackViewport() {
+        let document = LyricsDocument(
+            lines: [
+                LyricsLine(id: 0, timestamp: 0, text: "Opening"),
+                LyricsLine(id: 1, timestamp: 4, text: "   "),
+                LyricsLine(id: 2, timestamp: 8, text: "Next")
+            ],
+            isSynced: true,
+            isInstrumental: false
+        )
+
+        XCTAssertEqual(document.visibleLines.map(\.text), ["Opening", "Next"])
+    }
+
     func testEndedAudioSessionCannotPublishFeatures() throws {
         let analyzer = try XCTUnwrap(BeatAnalyzer())
         let staleFeature = expectation(description: "Stale session feature")

@@ -45,26 +45,6 @@ enum LyricsTimeline {
 
         return result
     }
-
-    static func progress(
-        in lines: [LyricsLine],
-        activeIndex: Int?,
-        at position: TimeInterval,
-        duration: TimeInterval
-    ) -> Double {
-        guard let activeIndex,
-              lines.indices.contains(activeIndex),
-              let start = lines[activeIndex].timestamp,
-              start.isFinite,
-              position.isFinite else { return 0 }
-
-        let nextStart = lines[(activeIndex + 1)...]
-            .compactMap(\.timestamp)
-            .first
-        let fallbackEnd = duration > start ? duration : start + 4
-        let end = max(start + 0.5, nextStart ?? fallbackEnd)
-        return min(1, max(0, (position - start) / (end - start)))
-    }
 }
 
 enum LyricsState: Equatable {
@@ -322,17 +302,25 @@ final class LyricsStore: ObservableObject {
 
     private static func parseSyncedLyrics(_ lyrics: String) -> [LyricsLine]? {
         var parsed: [(timestamp: TimeInterval, text: String, order: Int)] = []
+        var offset: TimeInterval = 0
 
         for (order, rawLine) in lyrics.components(separatedBy: .newlines).enumerated() {
             var remainder = rawLine
+                .replacingOccurrences(of: "\u{FEFF}", with: "")
             var timestamps: [TimeInterval] = []
 
             while remainder.first == "[",
                   let closingBracket = remainder.firstIndex(of: "]") {
                 let tagStart = remainder.index(after: remainder.startIndex)
                 let tag = String(remainder[tagStart..<closingBracket])
-                if let timestamp = parseTimestamp(tag) {
-                    timestamps.append(timestamp)
+                let normalizedTag = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+                if normalizedTag.lowercased().hasPrefix("offset:") {
+                    let value = normalizedTag.dropFirst("offset:".count)
+                    if let milliseconds = Double(value), milliseconds.isFinite {
+                        offset = milliseconds / 1_000
+                    }
+                } else if let timestamp = parseTimestamp(normalizedTag) {
+                    timestamps.append(max(0, timestamp + offset))
                 }
                 remainder = String(remainder[remainder.index(after: closingBracket)...])
             }
@@ -359,7 +347,10 @@ final class LyricsStore: ObservableObject {
         guard components.count == 2,
               let minutes = Double(components[0]),
               let seconds = Double(components[1]),
-              minutes >= 0, seconds >= 0 else { return nil }
+              minutes.isFinite,
+              seconds.isFinite,
+              minutes >= 0,
+              seconds >= 0 else { return nil }
         return minutes * 60 + seconds
     }
 }

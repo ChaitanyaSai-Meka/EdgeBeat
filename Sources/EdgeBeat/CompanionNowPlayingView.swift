@@ -20,11 +20,11 @@ struct CompanionNowPlayingView: View {
     private static let horizontalInset: CGFloat = 40
     private static let artworkMaxSide: CGFloat = 500
     private static let artworkMinSide: CGFloat = 150
-    private static let sideArtworkMaxSide: CGFloat = 460
+    private static let sideArtworkMaxSide: CGFloat = 480
     private static let sideLyricsMinWidth: CGFloat = 860
     private static let sideLyricsMinHeight: CGFloat = 560
-    private static let sideLyricsSpacing: CGFloat = 40
-    private static let sideLyricsMaxWidth: CGFloat = 680
+    private static let sideLyricsSpacing: CGFloat = 56
+    private static let sideLyricsMaxWidth: CGFloat = 720
     private static let headerHeight: CGFloat = 78
     private static let controlsHeight: CGFloat = 112
     private static let metadataHeight: CGFloat = 180
@@ -127,23 +127,36 @@ struct CompanionNowPlayingView: View {
                 Image(nsImage: backdropImage)
                     .resizable()
                     .scaledToFill()
-                    .blur(radius: showsLyrics ? 72 : 48)
-                    .opacity(showsLyrics ? 0.42 : 0.16)
+                    .scaleEffect(showsLyrics ? 1.16 : 1.08)
+                    .saturation(showsLyrics ? 1.24 : 1)
+                    .blur(radius: showsLyrics ? 84 : 48)
+                    .opacity(showsLyrics ? 0.60 : 0.16)
                     .ignoresSafeArea()
             }
 
-            Color.black.opacity(showsLyrics ? 0.64 : 0.94)
+            Color.black.opacity(showsLyrics ? 0.38 : 0.94)
                 .ignoresSafeArea()
 
             if showsLyrics {
                 LinearGradient(
                     colors: [
-                        .black.opacity(0.42),
-                        .black.opacity(0.12),
-                        .black.opacity(0.52)
+                        .black.opacity(0.24),
+                        .black.opacity(0.04),
+                        .black.opacity(0.18)
                     ],
                     startPoint: .leading,
                     endPoint: .trailing
+                )
+                .ignoresSafeArea()
+
+                LinearGradient(
+                    colors: [
+                        .black.opacity(0.22),
+                        .clear,
+                        .black.opacity(0.20)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
                 .ignoresSafeArea()
             }
@@ -345,8 +358,12 @@ struct CompanionNowPlayingView: View {
             Spacer(minLength: 0)
 
             if showsLyrics {
-                lyricsPanel
-                    .frame(height: artworkSide + metrics.metadataHeight)
+                compactLyricsLayout(
+                    width: width,
+                    height: artworkSide + metrics.metadataHeight,
+                    artworkSide: artworkSide,
+                    isCompact: metrics.isCompact
+                )
             } else {
                 artworkView(size: artworkSide)
 
@@ -368,19 +385,45 @@ struct CompanionNowPlayingView: View {
         .animation(.easeInOut(duration: 0.24), value: showsLyrics)
     }
 
+    private func compactLyricsLayout(
+        width: CGFloat,
+        height: CGFloat,
+        artworkSide: CGFloat,
+        isCompact: Bool
+    ) -> some View {
+        let thumbnailSide = min(92, max(72, artworkSide * 0.62))
+        let headerHeight = thumbnailSide + 12
+
+        return VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                artworkView(size: thumbnailSide, cornerRadius: 12)
+
+                metadata(isCompact: isCompact, showsWaveform: false, leading: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: headerHeight)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 10)
+
+            lyricsPanel
+                .frame(maxHeight: .infinity)
+        }
+        .frame(width: width, height: height, alignment: .top)
+    }
+
     private func sideLyricsLayout(
         width: CGFloat,
         height: CGFloat,
         metrics: LayoutMetrics
     ) -> some View {
-        let lyricsWidth = min(Self.sideLyricsMaxWidth, max(380, width * 0.46))
+        let lyricsWidth = min(Self.sideLyricsMaxWidth, max(400, width * 0.48))
         let artworkColumnWidth = max(0, width - lyricsWidth - Self.sideLyricsSpacing)
-        let metadataHeight = min(metrics.metadataHeight, 154)
-        let controlsHeight = min(metrics.controlsHeight, 96)
-        let progressHeight = min(metrics.progressHeight, 58)
+        let metadataHeight: CGFloat = 72
+        let controlsHeight: CGFloat = 58
+        let progressHeight: CGFloat = 48
         let artworkAvailableHeight = max(
             metrics.artworkMinSide,
-            height - metadataHeight - controlsHeight - progressHeight - 24
+            height - metadataHeight - controlsHeight - progressHeight - 72
         )
         let artworkSide = min(
             Self.sideArtworkMaxSide,
@@ -390,7 +433,7 @@ struct CompanionNowPlayingView: View {
             )
         )
 
-        return HStack(alignment: .top, spacing: Self.sideLyricsSpacing) {
+        return HStack(alignment: .center, spacing: Self.sideLyricsSpacing) {
             sidePlaybackColumn(
                 width: artworkColumnWidth,
                 height: height,
@@ -418,58 +461,100 @@ struct CompanionNowPlayingView: View {
 
             artworkView(size: artworkSide, cornerRadius: 16)
 
-            metadata(isCompact: false, showsWaveform: false, leading: true)
-                .padding(.top, 16)
+            sideMetadata
+                .padding(.top, 18)
                 .frame(height: metadataHeight, alignment: .top)
 
             progress
                 .frame(height: progressHeight)
 
             sideControls
-                .frame(height: controlsHeight, alignment: .top)
+                .frame(height: controlsHeight, alignment: .center)
+
+            Spacer(minLength: 0)
         }
-        .frame(width: width, height: height)
+        .frame(width: min(width, artworkSide), height: height)
+        .frame(width: width, height: height, alignment: .center)
     }
 
     private var sideControls: some View {
-        HStack(spacing: 22) {
-            controlButton(
-                .toggleShuffle,
-                icon: "shuffle",
-                label: track.isShuffleEnabled ? "Turn Shuffle Off" : "Turn Shuffle On",
-                isActive: track.isShuffleEnabled,
-                isCompact: true
-            )
-
-            HStack(spacing: 18) {
-                controlButton(
-                    .previousTrack,
-                    icon: "backward.fill",
-                    label: "Previous",
-                    isCompact: true
+        ZStack {
+            HStack {
+                sideControlButton(
+                    .toggleShuffle,
+                    icon: "shuffle",
+                    label: track.isShuffleEnabled ? "Turn Shuffle Off" : "Turn Shuffle On",
+                    isActive: track.isShuffleEnabled
                 )
-                controlButton(
+
+                Spacer()
+
+                Button(action: copyTrackInfo) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.76))
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Copy Track Info")
+                .accessibilityLabel("Copy Track Info")
+                .disabled(!canControlPlayback)
+            }
+
+            HStack(spacing: 24) {
+                sideControlButton(.previousTrack, icon: "backward.fill", label: "Previous")
+                sideControlButton(
                     .togglePlayPause,
                     icon: track.state == .playing ? "pause.fill" : "play.fill",
                     label: track.state == .playing ? "Pause" : "Play",
-                    isPrimary: true,
-                    isCompact: true
+                    isPrimary: true
                 )
-                controlButton(
-                    .nextTrack,
-                    icon: "forward.fill",
-                    label: "Next",
-                    isCompact: true
-                )
+                sideControlButton(.nextTrack, icon: "forward.fill", label: "Next")
             }
-
-            utilityButton(
-                icon: "ellipsis.circle",
-                label: "Copy Track Info",
-                action: copyTrackInfo
-            )
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var sideMetadata: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(track.title)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .accessibilityAddTraits(.isHeader)
+
+            Text(track.artist.isEmpty ? track.album : track.artist)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.62))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func sideControlButton(
+        _ command: PlaybackCommand,
+        icon: String,
+        label: String,
+        isPrimary: Bool = false,
+        isActive: Bool = false
+    ) -> some View {
+        Button {
+            onPlaybackCommand(command, track.source)
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: isPrimary ? 22 : 16, weight: .semibold))
+                .foregroundStyle(isActive ? accent : Color.white.opacity(isPrimary ? 1 : 0.82))
+                .frame(width: isPrimary ? 46 : 40, height: isPrimary ? 46 : 40)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+        .disabled(!canControlPlayback)
     }
 
     private func layoutMetrics(for playerHeight: CGFloat) -> LayoutMetrics {
@@ -500,108 +585,46 @@ struct CompanionNowPlayingView: View {
     }
 
     private var lyricsPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "text.quote")
-                    .foregroundStyle(accent)
-                Text("Lyrics")
-                    .font(.system(size: 15, weight: .semibold))
-
-                Spacer()
-            }
-
+        ZStack {
             lyricsContent
-
-            Text("Lyrics provided by LRCLIB")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.tertiary)
+                .mask(lyricsFadeMask)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 18)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
+        .overlay(alignment: .bottomLeading) {
+            lyricsAttribution
+                .padding(.leading, 12)
         }
     }
 
     private var sideLyricsView: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "text.quote")
-                    .foregroundStyle(accent)
-
-                Text("Lyrics")
-                    .font(.system(size: 15, weight: .semibold))
-
-                Spacer()
-
-                Text("SYNCED")
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(accent.opacity(0.13), in: Capsule())
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 17)
-            .padding(.bottom, 12)
-
-            Rectangle()
-                .fill(.white.opacity(0.09))
-                .frame(height: 1)
-                .padding(.horizontal, 20)
-
-            ZStack {
-                sideLyricsContent
-                    .mask {
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0),
-                                .init(color: .black, location: 0.11),
-                                .init(color: .black, location: 0.88),
-                                .init(color: .clear, location: 1)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    }
-
-                VStack(spacing: 0) {
-                    LinearGradient(
-                        colors: [.black.opacity(0.2), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 34)
-
-                    Spacer(minLength: 0)
-
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.28)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 40)
-                }
-                .allowsHitTesting(false)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                Text("Lyrics by LRCLIB")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.34))
-                    .padding(.trailing, 20)
-                    .padding(.bottom, 13)
-            }
+        ZStack {
+            sideLyricsContent
+                .mask(lyricsFadeMask)
         }
-        .background(.ultraThinMaterial.opacity(0.34), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.13), lineWidth: 1)
+        .overlay(alignment: .bottomLeading) {
+            lyricsAttribution
+                .padding(.leading, 32)
+                .padding(.bottom, 12)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .accessibilityElement(children: .contain)
+    }
+
+    private var lyricsFadeMask: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: 0.12),
+                .init(color: .black, location: 0.86),
+                .init(color: .clear, location: 1)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var lyricsAttribution: some View {
+        Text("Lyrics by LRCLIB")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.white.opacity(0.28))
     }
 
     @ViewBuilder
@@ -661,7 +684,6 @@ struct CompanionNowPlayingView: View {
                     SyncedLyricsViewport(
                         lines: document.visibleLines,
                         position: resolvedPosition(at: context.date),
-                        duration: track.duration,
                         accent: accent,
                         compact: compact,
                         trackIdentifier: track.identifier,
@@ -672,7 +694,6 @@ struct CompanionNowPlayingView: View {
                 SyncedLyricsViewport(
                     lines: document.visibleLines,
                     position: resolvedPosition(at: Date()),
-                    duration: track.duration,
                     accent: accent,
                     compact: compact,
                     trackIdentifier: track.identifier,
@@ -689,24 +710,28 @@ struct CompanionNowPlayingView: View {
         compact: Bool
     ) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: compact ? 12 : 15) {
+            LazyVStack(
+                alignment: compact ? .center : .leading,
+                spacing: compact ? 14 : 22
+            ) {
                 ForEach(document.lines) { line in
                     if line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Color.clear
-                            .frame(height: compact ? 8 : 14)
+                            .frame(height: compact ? 6 : 10)
                     } else {
                         Text(line.text)
-                            .font(.system(size: compact ? 19 : 23, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.82))
-                            .lineSpacing(compact ? 6 : 8)
-                            .multilineTextAlignment(.leading)
+                            .font(.system(size: compact ? 21 : 31, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(compact ? 0.78 : 0.62))
+                            .lineSpacing(compact ? 5 : 7)
+                            .multilineTextAlignment(compact ? .center : .leading)
                             .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: compact ? .center : .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            .padding(.horizontal, compact ? 12 : 18)
-            .padding(.vertical, compact ? 48 : 88)
+            .padding(.horizontal, compact ? 18 : 32)
+            .padding(.vertical, compact ? 54 : 104)
         }
         .scrollIndicators(.hidden)
     }
@@ -1268,18 +1293,17 @@ struct CompanionNowPlayingView: View {
 private struct SyncedLyricsViewport: View {
     let lines: [LyricsLine]
     let position: TimeInterval
-    let duration: TimeInterval
     let accent: Color
     let compact: Bool
     let onSeek: (TimeInterval) -> Void
     let trackIdentifier: String
 
     @State private var lastFocusedID: Int?
+    @State private var isUserScrolling = false
 
     init(
         lines: [LyricsLine],
         position: TimeInterval,
-        duration: TimeInterval,
         accent: Color,
         compact: Bool,
         trackIdentifier: String = "",
@@ -1287,7 +1311,6 @@ private struct SyncedLyricsViewport: View {
     ) {
         self.lines = lines
         self.position = position
-        self.duration = duration
         self.accent = accent
         self.compact = compact
         self.trackIdentifier = trackIdentifier
@@ -1298,153 +1321,136 @@ private struct SyncedLyricsViewport: View {
         let activeIndex = LyricsTimeline.activeIndex(in: lines, at: position)
         let activeID = activeIndex.map { lines[$0].id }
         let focusID = activeID ?? lines.first?.id
-        let activeProgress = LyricsTimeline.progress(
-            in: lines,
-            activeIndex: activeIndex,
-            at: position,
-            duration: duration
-        )
-
         return ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: compact ? 10 : 14) {
-                    ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
-                        SyncedLyricRow(
-                            line: line,
-                            isActive: index == activeIndex,
-                            isPast: activeIndex.map { index < $0 } ?? false,
-                            distance: activeIndex.map { abs(index - $0) } ?? index,
-                            progress: index == activeIndex ? activeProgress : 0,
-                            accent: accent,
-                            compact: compact,
-                            onSeek: onSeek
-                        )
-                        .id(line.id)
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView {
+                    LazyVStack(
+                        alignment: compact ? .center : .leading,
+                        spacing: compact ? 2 : 8
+                    ) {
+                        ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+                            lyricRow(
+                                line,
+                                at: index,
+                                activeIndex: activeIndex
+                            )
+                        }
                     }
+                    .padding(.horizontal, compact ? 18 : 32)
+                    .padding(.vertical, compact ? 60 : 112)
                 }
-                .padding(.horizontal, compact ? 10 : 16)
-                .padding(.vertical, compact ? 72 : 106)
+                .scrollIndicators(.hidden)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 8)
+                        .onChanged { _ in
+                            isUserScrolling = true
+                        }
+                )
+
+                if isUserScrolling, let focusID {
+                    Button {
+                        isUserScrolling = false
+                        lastFocusedID = focusID
+                        withAnimation(.smooth(duration: 0.42)) {
+                            proxy.scrollTo(focusID, anchor: .center)
+                        }
+                    } label: {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(accent, in: Circle())
+                            .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Jump to Current Lyric")
+                    .accessibilityLabel("Jump to Current Lyric")
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 18)
+                }
             }
-            .scrollIndicators(.hidden)
             .onChange(of: focusID, initial: true) { _, newID in
-                guard let newID, newID != lastFocusedID else { return }
+                guard let newID, newID != lastFocusedID, !isUserScrolling else { return }
                 lastFocusedID = newID
-                withAnimation(.easeInOut(duration: 0.34)) {
+                withAnimation(.smooth(duration: 0.42)) {
                     proxy.scrollTo(newID, anchor: .center)
                 }
             }
         }
         .id(trackIdentifier)
     }
+
+    private func lyricRow(
+        _ line: LyricsLine,
+        at index: Int,
+        activeIndex: Int?
+    ) -> some View {
+        SyncedLyricRow(
+            line: line,
+            isActive: index == activeIndex,
+            isPast: activeIndex.map { index < $0 } ?? false,
+            distance: activeIndex.map { abs(index - $0) } ?? index,
+            accent: accent,
+            compact: compact,
+            onSeek: onSeek
+        )
+        .equatable()
+        .id(line.id)
+    }
 }
 
-private struct SyncedLyricRow: View {
+private struct SyncedLyricRow: View, Equatable {
     let line: LyricsLine
     let isActive: Bool
     let isPast: Bool
     let distance: Int
-    let progress: Double
     let accent: Color
     let compact: Bool
     let onSeek: (TimeInterval) -> Void
 
+    static func == (lhs: SyncedLyricRow, rhs: SyncedLyricRow) -> Bool {
+        lhs.line == rhs.line
+            && lhs.isActive == rhs.isActive
+            && lhs.isPast == rhs.isPast
+            && lhs.distance == rhs.distance
+            && lhs.accent == rhs.accent
+            && lhs.compact == rhs.compact
+    }
+
     private var lineOpacity: Double {
         guard !isActive else { return 1 }
-        let base = isPast ? 0.38 : 0.58
-        return max(0.22, base - Double(max(0, distance - 1)) * 0.09)
+        if distance == 1 { return isPast ? 0.34 : 0.52 }
+        if distance == 2 { return isPast ? 0.22 : 0.32 }
+        return isPast ? 0.13 : 0.18
     }
 
-    private var lineHeight: CGFloat {
-        compact ? 48 : 56
-    }
-
-    private var textStyle: AnyShapeStyle {
-        if isActive {
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [.white, accent.opacity(0.92)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-        }
-        return AnyShapeStyle(Color.white.opacity(lineOpacity))
+    private var fontSize: CGFloat {
+        compact ? 21 : 32
     }
 
     private var lyricText: some View {
         Text(line.text)
-            .font(
-                .system(
-                    size: compact ? 20 : 24,
-                    weight: isActive ? .semibold : .medium
-                )
-            )
-            .foregroundStyle(textStyle)
-            .lineLimit(2)
-            .minimumScaleFactor(0.68)
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: lineHeight, alignment: .leading)
+            .font(.system(size: fontSize, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .lineLimit(compact ? 2 : 3)
+            .minimumScaleFactor(0.70)
+            .lineSpacing(compact ? 4 : 6)
+            .multilineTextAlignment(compact ? .center : .leading)
+            .frame(maxWidth: .infinity, alignment: compact ? .center : .leading)
+            .fixedSize(horizontal: false, vertical: true)
             .shadow(
-                color: isActive ? accent.opacity(0.36) : .clear,
-                radius: isActive ? 14 : 0
+                color: isActive ? accent.opacity(0.22) : .clear,
+                radius: isActive ? 16 : 0
             )
-    }
-
-    private var progressIndicator: some View {
-        Group {
-            if isActive {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(.white.opacity(0.12))
-
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [accent.opacity(0.55), accent],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(
-                                width: max(10, proxy.size.width * CGFloat(progress))
-                            )
-                    }
-                }
-                .frame(height: 3)
-            } else {
-                Color.clear.frame(height: 3)
-            }
-        }
     }
 
     private var rowContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            lyricText
-            progressIndicator
-        }
-        .padding(.horizontal, isActive ? 12 : 0)
-        .padding(.vertical, 8)
-        .background {
-            if isActive {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(accent.opacity(0.09))
-            }
-        }
-        .overlay(alignment: .leading) {
-            if isActive {
-                Capsule()
-                    .fill(accent)
-                    .frame(width: 3, height: 28)
-                    .shadow(color: accent.opacity(0.6), radius: 8)
-            }
-        }
-        .scaleEffect(isActive ? 1.02 : (distance == 1 ? 1 : 0.98), anchor: .leading)
+        lyricText
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, compact ? 8 : 12)
         .opacity(lineOpacity)
-        .blur(radius: distance > 2 ? 0.35 : 0)
-        .animation(.easeInOut(duration: 0.24), value: isActive)
-        .animation(.easeInOut(duration: 0.24), value: lineOpacity)
+        .animation(.easeInOut(duration: 0.30), value: isActive)
+        .animation(.easeInOut(duration: 0.30), value: lineOpacity)
     }
 
     var body: some View {
