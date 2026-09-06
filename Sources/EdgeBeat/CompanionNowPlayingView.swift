@@ -265,8 +265,7 @@ struct CompanionNowPlayingView: View {
 
     private var lyricsToggle: some View {
         Button {
-            showsLyrics.toggle()
-            if showsLyrics { loadLyrics() }
+            toggleLyrics()
         } label: {
             Image(systemName: showsLyrics ? "music.note.list" : "text.quote")
                 .font(.system(size: 13, weight: .semibold))
@@ -288,6 +287,15 @@ struct CompanionNowPlayingView: View {
         .accessibilityLabel(showsLyrics ? "Hide Lyrics" : "Show Lyrics")
         .disabled(!canLoadLyrics)
         .opacity(canLoadLyrics ? 1 : 0.45)
+    }
+
+    private func toggleLyrics() {
+        showsLyrics.toggle()
+        if showsLyrics {
+            loadLyrics()
+        } else if case .loading = lyricsStore.state {
+            lyricsStore.reset()
+        }
     }
 
     private var routeSummary: some View {

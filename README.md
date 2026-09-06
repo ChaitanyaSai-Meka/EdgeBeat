@@ -8,7 +8,7 @@ The application runs from the menu bar, stays visible over full-screen apps,
 supports multiple displays, follows the physical MacBook notch, and can show an
 interactive now-playing card on the lock screen.
 
-Current version: `1.2.0`
+Current version: `1.3.0`
 
 ## Features
 

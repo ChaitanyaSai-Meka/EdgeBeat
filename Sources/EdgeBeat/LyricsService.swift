@@ -21,6 +21,11 @@ struct LyricsDocument: Equatable {
     }
 }
 
+private func normalizedLyricsDuration(_ value: TimeInterval) -> Int? {
+    guard value.isFinite, value > 0 else { return nil }
+    return Int(exactly: value.rounded())
+}
+
 enum LyricsTimeline {
     static func activeIndex(in lines: [LyricsLine], at position: TimeInterval) -> Int? {
         let timedIndices = lines.indices.filter { lines[$0].timestamp != nil }
@@ -62,11 +67,13 @@ final class LyricsStore: ObservableObject {
         let title: String
         let artist: String
         let album: String
+        let duration: Int?
 
-        init(title: String, artist: String, album: String) {
+        init(title: String, artist: String, album: String, duration: TimeInterval) {
             self.title = Self.normalized(title)
             self.artist = Self.normalized(artist)
             self.album = Self.normalized(album)
+            self.duration = normalizedLyricsDuration(duration)
         }
 
         private static func normalized(_ value: String) -> String {
@@ -122,7 +129,8 @@ final class LyricsStore: ObservableObject {
             return
         }
 
-        let key = LookupKey(title: title, artist: artist, album: album)
+        let key = LookupKey(title: title, artist: artist, album: album,
+                            duration: duration)
         guard !key.title.isEmpty, !key.artist.isEmpty else {
             task?.cancel()
             task = nil
@@ -218,14 +226,12 @@ final class LyricsStore: ObservableObject {
         duration: TimeInterval
     ) -> URL? {
         var components = URLComponents(string: "https://lrclib.net/api/get")
+        let durationValue = normalizedLyricsDuration(duration).map(String.init)
         components?.queryItems = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist),
             URLQueryItem(name: "album_name", value: album),
-            URLQueryItem(
-                name: "duration",
-                value: duration > 0 ? String(Int(duration.rounded())) : nil
-            )
+            URLQueryItem(name: "duration", value: durationValue)
         ]
         return components?.url
     }
