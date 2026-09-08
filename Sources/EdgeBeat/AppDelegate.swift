@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        configureApplicationMenu()
         configureMenuBar()
         configurePlaybackPipeline()
         nowPlaying.setSource(preferences.playerSource)
@@ -69,6 +70,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         nowPlaying.start()
         audioOutputMonitor.start()
+    }
+
+    private func configureApplicationMenu() {
+        let mainMenu = NSMenu()
+
+        let applicationItem = NSMenuItem()
+        let applicationMenu = NSMenu(title: "EdgeBeat")
+        applicationMenu.addItem(
+            NSMenuItem(
+                title: "About EdgeBeat",
+                action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+                keyEquivalent: ""
+            )
+        )
+        applicationMenu.addItem(.separator())
+
+        let hideItem = NSMenuItem(
+            title: "Hide EdgeBeat",
+            action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h"
+        )
+        hideItem.keyEquivalentModifierMask = [.command]
+        applicationMenu.addItem(hideItem)
+        applicationMenu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit EdgeBeat",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        quitItem.keyEquivalentModifierMask = [.command]
+        applicationMenu.addItem(quitItem)
+        applicationItem.submenu = applicationMenu
+        mainMenu.addItem(applicationItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        let minimizeItem = NSMenuItem(
+            title: "Minimize",
+            action: #selector(NSWindow.miniaturize(_:)),
+            keyEquivalent: "m"
+        )
+        minimizeItem.keyEquivalentModifierMask = [.command]
+        windowMenu.addItem(minimizeItem)
+        let zoomItem = NSMenuItem(
+            title: "Zoom",
+            action: #selector(NSWindow.performZoom(_:)),
+            keyEquivalent: ""
+        )
+        windowMenu.addItem(zoomItem)
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+
+        NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -23,7 +23,7 @@ Current version: `1.3.0`
 - Notch-aware lighting on supported MacBook displays
 - Full-screen app and multi-Space support
 - Lock-screen artwork, progress, and playback controls
-- Separate Now Playing window with artwork, progress, playback controls, and full-screen mode
+- Separate Now Playing window with artwork, progress, playback controls, and native full-screen mode
 - On-demand lyrics lookup in the Now Playing window
 - Persistent settings and optional Launch at Login
 - Adaptive refresh rates that respect macOS Low Power Mode and display sleep
@@ -102,6 +102,10 @@ open EdgeBeat.app
 
 EdgeBeat runs as a menu-bar application. A waveform icon will appear in the menu
 bar; no Dock icon is shown.
+
+This opens the bundle generated in the repository directory. It is separate from
+any older copy already installed in `/Applications`; rebuilding here does not
+replace that installed copy.
 
 You can build and launch in one command during development:
 
@@ -205,7 +209,10 @@ or the standard macOS green window control to enter full screen. The companion
 remains connected to the same Spotify or Apple Music monitor as the menu-bar and
 lock-screen controls. The native close and minimize buttons hide the window
 without stopping playback monitoring, and the controls remain available after
-entering or leaving macOS full screen.
+entering or leaving macOS full screen. Full screen follows the normal macOS
+menu-bar behavior: the bar stays hidden while the pointer is away from the top
+edge, then appears when the pointer reaches it. The EdgeBeat status item and
+standard application menu are available from that revealed menu bar.
 
 ## Release Notes
 
@@ -279,6 +286,14 @@ open EdgeBeat.app
 ```
 
 If the menu bar is crowded, macOS may hide some status items.
+
+### The menu bar does not appear in companion full screen
+
+The companion uses macOS's standard full-screen auto-hide behavior. Move the
+pointer to the top edge of the display and wait briefly for the menu bar to slide
+down. If you are testing a source build, make sure you opened the `EdgeBeat.app`
+inside the repository after running `bash scripts/build.sh`; an older copy in
+`/Applications` is not updated automatically.
 
 ### The lighting does not appear
 
