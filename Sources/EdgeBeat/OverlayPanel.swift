@@ -81,7 +81,8 @@ private final class LockScreenCardPanel: NSPanel {
     private static let maximumWidth: CGFloat = 548
 
     init(screen: NSScreen, renderState: RenderState,
-         onPlaybackCommand: @escaping (PlaybackCommand, PlayerSource) -> Void) {
+         onPlaybackCommand: @escaping (PlaybackCommand, PlayerSource) -> Void,
+         onSeek: @escaping (TimeInterval, PlayerSource) -> Void) {
         let frame = Self.cardFrame(on: screen)
         super.init(
             contentRect: frame,
@@ -104,7 +105,8 @@ private final class LockScreenCardPanel: NSPanel {
 
         let view = LockScreenNowPlayingView(
             renderState: renderState,
-            onPlaybackCommand: onPlaybackCommand
+            onPlaybackCommand: onPlaybackCommand,
+            onSeek: onSeek
         )
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: frame.size)
@@ -141,6 +143,7 @@ final class OverlayController {
     private let preferences: AppPreferences
     private let renderState: RenderState
     private let onPlaybackCommand: (PlaybackCommand, PlayerSource) -> Void
+    private let onSeek: (TimeInterval, PlayerSource) -> Void
     private var panels: [CGDirectDisplayID: OverlayPanel] = [:]
     private var cardPanel: LockScreenCardPanel?
     private var cardDisplayID: CGDirectDisplayID?
@@ -149,10 +152,12 @@ final class OverlayController {
     private var pendingSpaceRefresh: DispatchWorkItem?
 
     init(preferences: AppPreferences, renderState: RenderState,
-         onPlaybackCommand: @escaping (PlaybackCommand, PlayerSource) -> Void) {
+         onPlaybackCommand: @escaping (PlaybackCommand, PlayerSource) -> Void,
+         onSeek: @escaping (TimeInterval, PlayerSource) -> Void) {
         self.preferences = preferences
         self.renderState = renderState
         self.onPlaybackCommand = onPlaybackCommand
+        self.onSeek = onSeek
     }
 
     func show() {
@@ -299,7 +304,8 @@ final class OverlayController {
             cardPanel = LockScreenCardPanel(
                 screen: screen,
                 renderState: renderState,
-                onPlaybackCommand: onPlaybackCommand
+                onPlaybackCommand: onPlaybackCommand,
+                onSeek: onSeek
             )
             cardDisplayID = displayID
         } else {

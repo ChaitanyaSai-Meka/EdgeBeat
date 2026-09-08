@@ -10,7 +10,8 @@ record.
 
 Refines the companion Now Playing window with an Apple Music-inspired lyrics
 view, stronger active-line focus, improved responsive layouts, more robust LRC
-parsing, and corrected native full-screen menu-bar behavior.
+parsing, corrected native full-screen menu-bar behavior, and interactive
+lock-screen progress seeking.
 
 ## Previous Releases
 

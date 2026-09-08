@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderState: renderState,
         onPlaybackCommand: { [weak self] command, source in
             self?.nowPlaying.perform(command, for: source)
+        },
+        onSeek: { [weak self] position, source in
+            self?.nowPlaying.seek(to: position, for: source)
         }
     )
     private let nowPlaying = NowPlayingMonitor()
