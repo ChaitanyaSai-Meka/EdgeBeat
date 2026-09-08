@@ -21,6 +21,7 @@ final class SkyLightLockBridge {
     private let space: Int32
     private let addWindows: AddWindows
     private let removeWindows: RemoveWindows
+    private var delegatedWindowNumbers: Set<Int> = []
 
     private init?() {
         let handle = dlopen(
@@ -56,11 +57,25 @@ final class SkyLightLockBridge {
     }
 
     func delegate(_ window: NSWindow) {
-        _ = addWindows(connection, space, [window.windowNumber] as CFArray, 7)
+        let windowNumber = window.windowNumber
+        guard windowNumber > 0, delegatedWindowNumbers.insert(windowNumber).inserted else { return }
+        let status = addWindows(connection, space, [windowNumber] as CFArray, 7)
+        guard status == 0 else {
+            delegatedWindowNumbers.remove(windowNumber)
+            logger.error("Could not delegate lock-screen window \(windowNumber, privacy: .public) (status \(status))")
+            return
+        }
     }
 
     func undelegate(_ window: NSWindow) {
-        _ = removeWindows(connection, [window.windowNumber] as CFArray, [space] as CFArray)
+        let windowNumber = window.windowNumber
+        guard windowNumber > 0, delegatedWindowNumbers.remove(windowNumber) != nil else { return }
+        let status = removeWindows(connection, [windowNumber] as CFArray, [space] as CFArray)
+        guard status == 0 else {
+            delegatedWindowNumbers.insert(windowNumber)
+            logger.error("Could not remove lock-screen window \(windowNumber, privacy: .public) (status \(status))")
+            return
+        }
     }
 
     private static func symbol<T>(_ handle: UnsafeMutableRawPointer, _ name: String,

@@ -227,13 +227,29 @@ final class LyricsStore: ObservableObject {
     ) -> URL? {
         var components = URLComponents(string: "https://lrclib.net/api/get")
         let durationValue = normalizedLyricsDuration(duration).map(String.init)
-        components?.queryItems = [
-            URLQueryItem(name: "track_name", value: title),
-            URLQueryItem(name: "artist_name", value: artist),
-            URLQueryItem(name: "album_name", value: album),
-            URLQueryItem(name: "duration", value: durationValue)
+        let queryItems: [(name: String, value: String?)] = [
+            ("track_name", title),
+            ("artist_name", artist),
+            ("album_name", album),
+            ("duration", durationValue)
         ]
+        components?.percentEncodedQuery = queryItems.map { name, value in
+            let encodedName = Self.percentEncodeQueryComponent(name)
+            guard let value else { return encodedName }
+            return encodedName + "=" + Self.percentEncodeQueryComponent(value)
+        }.joined(separator: "&")
         return components?.url
+    }
+
+    private static let queryComponentAllowedCharacters: CharacterSet = {
+        CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+        )
+    }()
+
+    private static func percentEncodeQueryComponent(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: queryComponentAllowedCharacters)
+            ?? value
     }
 
     private static func process(
@@ -349,14 +365,15 @@ final class LyricsStore: ObservableObject {
     }
 
     private static func parseTimestamp(_ value: String) -> TimeInterval? {
-        let components = value.split(separator: ":", maxSplits: 1)
-        guard components.count == 2,
-              let minutes = Double(components[0]),
-              let seconds = Double(components[1]),
-              minutes.isFinite,
-              seconds.isFinite,
-              minutes >= 0,
-              seconds >= 0 else { return nil }
-        return minutes * 60 + seconds
+        let components = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard components.count == 2 || components.count == 3 else { return nil }
+        let values = components.compactMap { Double($0) }
+        guard values.count == components.count,
+              values.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
+
+        if values.count == 2 {
+            return values[0] * 60 + values[1]
+        }
+        return values[0] * 3_600 + values[1] * 60 + values[2]
     }
 }

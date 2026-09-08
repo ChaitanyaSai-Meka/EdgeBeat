@@ -116,13 +116,15 @@ final class AppPreferences: ObservableObject {
         secondaryColor = Self.loadColor(defaults: defaults, key: Keys.secondaryColor)
             ?? NSColor(calibratedRed: 1, green: 0.25, blue: 0.65, alpha: 1)
         let usedLegacyOrbit = defaults.string(forKey: Keys.animationMode) == "Orbit"
-        intensity = defaults.object(forKey: Keys.intensity) as? Double ?? 0.85
-        thickness = defaults.object(forKey: Keys.thickness) as? Double ?? 0.45
+        intensity = Self.loadUnitValue(defaults: defaults, key: Keys.intensity, fallback: 0.85)
+        thickness = Self.loadUnitValue(defaults: defaults, key: Keys.thickness, fallback: 0.45)
         waveFlowEnabled = defaults.object(forKey: Keys.waveFlowEnabled) as? Bool ?? usedLegacyOrbit
-        waveLength = defaults.object(forKey: Keys.waveLength) as? Double ?? 0.5
-        waveIntensity = defaults.object(forKey: Keys.waveIntensity) as? Double ?? 0.75
-        let storedWaveSpeed = defaults.object(forKey: Keys.waveSpeed) as? Double ?? 0.6
-        waveSpeed = WaveSpeedPreset.nearest(to: storedWaveSpeed).speed
+        waveLength = Self.loadUnitValue(defaults: defaults, key: Keys.waveLength, fallback: 0.5)
+        waveIntensity = Self.loadUnitValue(defaults: defaults, key: Keys.waveIntensity, fallback: 0.75)
+        let storedWaveSpeed = Self.loadFiniteValue(defaults: defaults, key: Keys.waveSpeed, fallback: 0.6)
+        let normalizedWaveSpeed = WaveSpeedPreset.nearest(to: storedWaveSpeed).speed
+        waveSpeed = normalizedWaveSpeed
+        defaults.set(normalizedWaveSpeed, forKey: Keys.waveSpeed)
         waveFlowDirection = WaveFlowDirection(
             rawValue: defaults.string(forKey: Keys.waveFlowDirection) ?? ""
         ) ?? .clockwise
@@ -135,6 +137,31 @@ final class AppPreferences: ObservableObject {
         guard let rgb = color.usingColorSpace(.deviceRGB) else { return }
         defaults.set([rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent],
                      forKey: key)
+    }
+
+    /// Reads a user-controlled slider value defensively. UserDefaults can be
+    /// edited externally, so reject NaN/infinity and keep rendering inputs in
+    /// the range expected by the view and menu sliders.
+    static func clampedUnitValue(_ value: Double, fallback: Double) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(1, max(0, value))
+    }
+
+    private static func loadUnitValue(defaults: UserDefaults, key: String,
+                                     fallback: Double) -> Double {
+        let value = loadFiniteValue(defaults: defaults, key: key, fallback: fallback)
+        let clamped = clampedUnitValue(value, fallback: fallback)
+        defaults.set(clamped, forKey: key)
+        return clamped
+    }
+
+    private static func loadFiniteValue(defaults: UserDefaults, key: String,
+                                       fallback: Double) -> Double {
+        guard let value = defaults.object(forKey: key) as? Double, value.isFinite else {
+            defaults.set(fallback, forKey: key)
+            return fallback
+        }
+        return value
     }
 
     private static func loadColor(defaults: UserDefaults, key: String) -> NSColor? {

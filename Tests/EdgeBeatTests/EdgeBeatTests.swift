@@ -40,6 +40,64 @@ final class EdgeBeatTests: XCTestCase {
         XCTAssertEqual(NowPlayingMonitor.normalizeSpotifyDuration(125_000), 125)
     }
 
+    func testSpotifyTrackIdentifierUsesStableIDAndSeparatesFallbackTracks() {
+        XCTAssertEqual(
+            NowPlayingMonitor.spotifyTrackIdentifier(
+                trackID: " spotify:track:123 ",
+                title: "First",
+                artist: "Artist",
+                album: "Album",
+                duration: 180
+            ),
+            "spotify:track:123"
+        )
+
+        let first = NowPlayingMonitor.spotifyTrackIdentifier(
+            trackID: "",
+            title: "First",
+            artist: "Artist",
+            album: "Album",
+            duration: 180
+        )
+        let second = NowPlayingMonitor.spotifyTrackIdentifier(
+            trackID: "",
+            title: "Second",
+            artist: "Artist",
+            album: "Album",
+            duration: 180
+        )
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(
+            first,
+            NowPlayingMonitor.spotifyTrackIdentifier(
+                trackID: "",
+                title: "First",
+                artist: "Artist",
+                album: "Album",
+                duration: 180_000
+            )
+        )
+    }
+
+    func testPersistedSliderValuesAreFiniteAndClamped() throws {
+        let suiteName = "EdgeBeatTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(-0.25, forKey: "glow.intensity")
+        defaults.set(2.5, forKey: "glow.thickness")
+        defaults.set(Double.nan, forKey: "waveFlow.length")
+        defaults.set(Double.infinity, forKey: "waveFlow.intensity")
+
+        let preferences = AppPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.intensity, 0)
+        XCTAssertEqual(preferences.thickness, 1)
+        XCTAssertEqual(preferences.waveLength, 0.5)
+        XCTAssertEqual(preferences.waveIntensity, 0.75)
+        XCTAssertEqual(defaults.double(forKey: "glow.intensity"), 0)
+        XCTAssertEqual(defaults.double(forKey: "glow.thickness"), 1)
+    }
+
     func testGenerationInvalidatesOldWork() {
         var counter = GenerationCounter()
         let first = counter.next()

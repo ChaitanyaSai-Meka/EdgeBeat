@@ -6,7 +6,7 @@ record.
 
 ## Current Release
 
-### [EdgeBeat 1.3.0](docs/releases/1.3.0.md) - 2026-09-05
+### [EdgeBeat 1.3.0](docs/releases/1.3.0.md) - 2026-09-09
 
 Refines the companion Now Playing window with an Apple Music-inspired lyrics
 view, stronger active-line focus, improved responsive layouts, and more robust

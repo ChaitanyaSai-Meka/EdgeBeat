@@ -97,7 +97,7 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
 
     func show() {
         guard let window else { return }
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }

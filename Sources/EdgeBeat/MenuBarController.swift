@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 private final class ColorPreviewView: NSView {
     var primary = NSColor.white { didSet { needsDisplay = true } }
@@ -115,6 +116,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        // Login-item consent can change in System Settings while EdgeBeat is
+        // running. Refresh before handling menu actions so the toggle reflects
+        // the service's actual state.
+        let status = SMAppService.mainApp.status
+        setLaunchAtLogin(status == .enabled || status == .requiresApproval)
         syncMenuState()
     }
 
@@ -567,6 +573,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
+        // Re-read immediately before calculating the requested transition. A
+        // stale checkmark would otherwise turn an external change into a
+        // redundant register/unregister call (and an avoidable alert).
+        let status = SMAppService.mainApp.status
+        setLaunchAtLogin(status == .enabled || status == .requiresApproval)
         let requested = sender.state != .on
         let enabled = onLaunchAtLoginChange?(requested) ?? false
         sender.state = enabled ? .on : .off

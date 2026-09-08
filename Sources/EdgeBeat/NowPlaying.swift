@@ -84,11 +84,44 @@ struct NowPlayingTrack: Equatable {
     let artwork: NSImage?
     let artworkRevision: String
     let identifier: String
+    /// The URL used to fetch Spotify artwork. This is intentionally separate
+    /// from `identifier`, which must identify the track rather than its album.
+    let artworkURL: String
     let state: PlaybackState
     let processID: pid_t?
     let duration: TimeInterval
     let position: TimeInterval
     let isShuffleEnabled: Bool
+
+    init(
+        source: PlayerSource,
+        title: String,
+        artist: String,
+        album: String,
+        artwork: NSImage?,
+        artworkRevision: String,
+        identifier: String,
+        artworkURL: String = "",
+        state: PlaybackState,
+        processID: pid_t?,
+        duration: TimeInterval,
+        position: TimeInterval,
+        isShuffleEnabled: Bool
+    ) {
+        self.source = source
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.artwork = artwork
+        self.artworkRevision = artworkRevision
+        self.identifier = identifier
+        self.artworkURL = artworkURL
+        self.state = state
+        self.processID = processID
+        self.duration = duration
+        self.position = position
+        self.isShuffleEnabled = isShuffleEnabled
+    }
 
     static let empty = NowPlayingTrack(
         source: .automatic,
@@ -98,6 +131,7 @@ struct NowPlayingTrack: Equatable {
         artwork: nil,
         artworkRevision: "",
         identifier: "",
+        artworkURL: "",
         state: .unavailable,
         processID: nil,
         duration: 0,
@@ -108,6 +142,7 @@ struct NowPlayingTrack: Equatable {
     static func == (lhs: NowPlayingTrack, rhs: NowPlayingTrack) -> Bool {
         lhs.source == rhs.source
             && lhs.identifier == rhs.identifier
+            && lhs.artworkURL == rhs.artworkURL
             && lhs.state == rhs.state
             && lhs.isShuffleEnabled == rhs.isShuffleEnabled
             && lhs.title == rhs.title
@@ -118,7 +153,7 @@ struct NowPlayingTrack: Equatable {
     }
 
     var artworkCacheKey: String {
-        [source.rawValue, identifier, title, artist, album].joined(separator: "|")
+        [source.rawValue, identifier, artworkURL, title, artist, album].joined(separator: "|")
     }
 
     func withArtwork(_ artwork: NSImage?, revision: String? = nil) -> NowPlayingTrack {
@@ -130,6 +165,7 @@ struct NowPlayingTrack: Equatable {
             artwork: artwork,
             artworkRevision: artwork == nil ? "" : (revision ?? ArtworkRevision.image(artwork)),
             identifier: identifier,
+            artworkURL: artworkURL,
             state: state,
             processID: processID,
             duration: duration,
@@ -147,6 +183,7 @@ struct NowPlayingTrack: Equatable {
             artwork: artwork,
             artworkRevision: artworkRevision,
             identifier: identifier,
+            artworkURL: artworkURL,
             state: state,
             processID: processID,
             duration: duration,
@@ -164,6 +201,7 @@ struct NowPlayingTrack: Equatable {
             artwork: artwork,
             artworkRevision: artworkRevision,
             identifier: identifier,
+            artworkURL: artworkURL,
             state: state,
             processID: processID,
             duration: duration,

@@ -22,6 +22,9 @@ final class NowPlayingMonitor {
     private var compiledScripts: [String: NSAppleScript] = [:]
     private var isPolling = false
     private var pollRequestedWhileBusy = false
+    private var scheduledPollDate: Date?
+    private var scheduledPollToken: UInt64 = 0
+    private var lastPollStartUptime: TimeInterval?
     private var pendingPlaybackState: PlaybackState?
     private var pendingPlaybackPosition: TimeInterval?
     private var playbackCommandGeneration = 0
@@ -38,10 +41,16 @@ final class NowPlayingMonitor {
     private let logger = Logger(subsystem: "com.chaitanya.edgebeat", category: "now-playing")
     private var lastPlayPauseCommandDate: Date?
 
+    // Spotify can emit PlaybackStateChanged several times per second. Keep
+    // notification-driven refreshes responsive while bounding helper launches.
+    private static let minimumNotificationPollInterval: TimeInterval = 0.5
+
     func start() {
         guard !isRunning else { return }
         isRunning = true
         pollRequestedWhileBusy = false
+        scheduledPollDate = nil
+        lastPollStartUptime = nil
         pendingPlaybackState = nil
         pendingPlaybackPosition = nil
         playbackCommandGeneration += 1
@@ -50,7 +59,7 @@ final class NowPlayingMonitor {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.requestImmediatePoll()
+            self?.requestPoll()
         }
         if isPolling {
             pollRequestedWhileBusy = true
@@ -61,6 +70,7 @@ final class NowPlayingMonitor {
 
     func stop() {
         isRunning = false
+        isPolling = false
         pollRequestedWhileBusy = false
         pendingPlaybackState = nil
         pendingPlaybackPosition = nil
@@ -68,6 +78,9 @@ final class NowPlayingMonitor {
         pollGeneration.invalidate()
         timer?.invalidate()
         timer = nil
+        scheduledPollDate = nil
+        scheduledPollToken &+= 1
+        lastPollStartUptime = nil
         if let spotifyPlaybackObserver {
             DistributedNotificationCenter.default().removeObserver(spotifyPlaybackObserver)
             self.spotifyPlaybackObserver = nil
@@ -77,7 +90,7 @@ final class NowPlayingMonitor {
     func setSource(_ source: PlayerSource) {
         guard self.source != source else { return }
         self.source = source
-        if isRunning { requestImmediatePoll() }
+        if isRunning { requestPoll() }
     }
 
     func setLowPowerMode(_ enabled: Bool) {
@@ -126,7 +139,7 @@ final class NowPlayingMonitor {
                 guard let self, self.playbackCommandGeneration == generation else { return }
                 self.pendingPlaybackState = nil
                 self.pendingPlaybackPosition = nil
-                self.requestImmediatePoll()
+                self.requestPoll()
             }
         }
 
@@ -152,7 +165,7 @@ final class NowPlayingMonitor {
             let refreshDelays: [TimeInterval] = isPlayPause ? [0.18, 0.65] : [0.2]
             for delay in refreshDelays {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                    self.requestImmediatePoll()
+                    self.requestPoll()
                 }
             }
         }
@@ -174,38 +187,42 @@ final class NowPlayingMonitor {
                 self.executeAppleScript(script)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self.requestImmediatePoll()
+                self.requestPoll()
             }
         }
     }
 
-    private func requestImmediatePoll() {
+    private func requestPoll() {
         guard isRunning else { return }
-        timer?.invalidate()
         if isPolling {
             pollRequestedWhileBusy = true
-        } else {
-            pollNow()
+            return
         }
+        // Keep one pending timer and enforce the minimum interval from the
+        // previous helper launch. Repeated notifications therefore coalesce
+        // instead of repeatedly cancelling and recreating the timer.
+        scheduleNextPoll(after: notificationPollDelay())
     }
 
     private func pollNow() {
         guard isRunning, !isPolling else { return }
+        timer?.invalidate()
+        timer = nil
+        scheduledPollDate = nil
+        scheduledPollToken &+= 1
         isPolling = true
+        lastPollStartUptime = ProcessInfo.processInfo.systemUptime
         let generation = pollGeneration.next()
         let requestedSource = source
         pollQueue.async { [weak self] in
             guard let self else { return }
             let track = self.readTrack(source: requestedSource)
             DispatchQueue.main.async {
+                // A stop/start can leave an older helper completion queued
+                // behind a newer poll. Do not mutate the newer poll's state.
+                guard self.pollGeneration.matches(generation) else { return }
                 self.isPolling = false
-                guard self.isRunning, self.pollGeneration.matches(generation) else {
-                    if self.isRunning, self.pollRequestedWhileBusy {
-                        self.pollRequestedWhileBusy = false
-                        self.pollNow()
-                    }
-                    return
-                }
+                guard self.isRunning else { return }
                 var resolvedTrack = self.resolvedArtwork(for: track)
                 let previousTrack = self.lastTrack
                 let isTransientUnavailable = track.state == .unavailable
@@ -242,7 +259,7 @@ final class NowPlayingMonitor {
                 self.loadArtworkIfNeeded(for: track, force: artworkContextChanged)
                 if self.pollRequestedWhileBusy {
                     self.pollRequestedWhileBusy = false
-                    self.scheduleNextPoll(after: 0.08)
+                    self.scheduleNextPoll(after: self.notificationPollDelay())
                 } else {
                     self.scheduleNextPoll(after: self.pollInterval(for: resolvedTrack.state))
                 }
@@ -252,11 +269,33 @@ final class NowPlayingMonitor {
 
     private func scheduleNextPoll(after delay: TimeInterval) {
         guard isRunning else { return }
+        let fireDate = Date().addingTimeInterval(max(0, delay))
+        if let scheduledPollDate,
+           timer != nil,
+           scheduledPollDate <= fireDate {
+            return
+        }
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            self?.pollNow()
+        scheduledPollToken &+= 1
+        let token = scheduledPollToken
+        scheduledPollDate = fireDate
+        timer = Timer.scheduledTimer(withTimeInterval: max(0, delay), repeats: false) {
+            [weak self] _ in
+            guard let self, self.scheduledPollToken == token else { return }
+            self.timer = nil
+            self.scheduledPollDate = nil
+            self.pollNow()
         }
         timer?.tolerance = delay < 1 ? 0.05 : min(2, max(0.2, delay * 0.2))
+    }
+
+    private func notificationPollDelay() -> TimeInterval {
+        guard let lastPollStartUptime else { return 0 }
+        return max(
+            0,
+            Self.minimumNotificationPollInterval
+                - (ProcessInfo.processInfo.systemUptime - lastPollStartUptime)
+        )
     }
 
     private func pollInterval(for state: PlaybackState) -> TimeInterval {
@@ -277,7 +316,7 @@ final class NowPlayingMonitor {
     private func readTrack(source: PlayerSource) -> NowPlayingTrack {
         if shouldUseMediaRemote(for: source),
            let track = mediaRemoteQueue.sync(execute: {
-               mediaRemote.readTrack(preferredSource: source)
+               mediaRemote.readTrack(preferredSource: source, includeArtwork: false)
            }),
            track.state == .playing || track.state == .paused {
             return track
@@ -370,7 +409,11 @@ final class NowPlayingMonitor {
           try
             set stateText to (player state as text)
             if stateText is "stopped" then return {}
-            return {stateText, name of current track, artist of current track, album of current track, artwork url of current track, duration of current track, player position, shuffling}
+            set trackIdentifier to ""
+            try
+              set trackIdentifier to (id of current track)
+            end try
+            return {stateText, name of current track, artist of current track, album of current track, artwork url of current track, trackIdentifier, duration of current track, player position, shuffling}
           on error
             return {}
           end try
@@ -378,29 +421,67 @@ final class NowPlayingMonitor {
         """
 
         guard let descriptor = executeCachedAppleScript(script, key: "Spotify.Playback"),
-              descriptor.numberOfItems >= 8 else { return nil }
+              descriptor.numberOfItems >= 9 else { return nil }
         let state = PlaybackState(rawValue: descriptor.atIndex(1)?.stringValue?.lowercased() ?? "")
             ?? .unavailable
         guard state == .playing || state == .paused else { return nil }
 
+        let title = descriptor.atIndex(2)?.stringValue ?? ""
+        let artist = descriptor.atIndex(3)?.stringValue ?? ""
+        let album = descriptor.atIndex(4)?.stringValue ?? ""
         let artworkURL = descriptor.atIndex(5)?.stringValue ?? ""
+        let trackIdentifier = descriptor.atIndex(6)?.stringValue ?? ""
+        let rawDuration = descriptor.atIndex(7)?.doubleValue ?? 0
+        let duration = Self.normalizeSpotifyDuration(rawDuration)
         let processID = NSRunningApplication.runningApplications(
             withBundleIdentifier: "com.spotify.client"
         ).first?.processIdentifier
         return NowPlayingTrack(
             source: .spotify,
-            title: descriptor.atIndex(2)?.stringValue ?? "",
-            artist: descriptor.atIndex(3)?.stringValue ?? "",
-            album: descriptor.atIndex(4)?.stringValue ?? "",
+            title: title,
+            artist: artist,
+            album: album,
             artwork: nil,
             artworkRevision: "",
-            identifier: artworkURL,
+            identifier: Self.spotifyTrackIdentifier(
+                trackID: trackIdentifier,
+                title: title,
+                artist: artist,
+                album: album,
+                duration: duration
+            ),
+            artworkURL: artworkURL,
             state: state,
             processID: processID,
-            duration: Self.normalizeSpotifyDuration(descriptor.atIndex(6)?.doubleValue ?? 0),
-            position: descriptor.atIndex(7)?.doubleValue ?? 0,
-            isShuffleEnabled: descriptor.atIndex(8)?.booleanValue ?? false
+            duration: duration,
+            position: descriptor.atIndex(8)?.doubleValue ?? 0,
+            isShuffleEnabled: descriptor.atIndex(9)?.booleanValue ?? false
         )
+    }
+
+    /// Returns Spotify's stable track ID when available, with a deterministic
+    /// metadata fallback for older clients or unusual local tracks.
+    static func spotifyTrackIdentifier(
+        trackID: String,
+        title: String,
+        artist: String,
+        album: String,
+        duration: TimeInterval
+    ) -> String {
+        let normalizedID = trackID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedID.isEmpty else { return normalizedID }
+
+        let normalizedDuration = normalizeSpotifyDuration(duration)
+        let durationMilliseconds: String
+        if normalizedDuration.isFinite {
+            durationMilliseconds = String(Int(max(0, normalizedDuration * 1_000).rounded()))
+        } else {
+            durationMilliseconds = "0"
+        }
+        // Length-prefix fields so delimiters in metadata cannot collide.
+        let fields = [title, artist, album, durationMilliseconds]
+            .map { "\($0.utf8.count):\($0)" }
+        return "spotify-track:" + fields.joined(separator: "|")
     }
 
     static func normalizeSpotifyDuration(_ duration: TimeInterval) -> TimeInterval {
@@ -433,7 +514,31 @@ final class NowPlayingMonitor {
         guard force || needsRefresh else { return }
         guard artworkRequests.insert(key).inserted else { return }
 
-        if track.source == .spotify, let url = URL(string: track.identifier) {
+        if track.source == .spotify,
+           track.artworkURL.isEmpty,
+           mediaRemote.isAvailable {
+            mediaRemoteQueue.async { [weak self] in
+                guard let self else { return }
+                let artworkTrack = self.mediaRemote.readTrack(
+                    preferredSource: .spotify,
+                    includeArtwork: true
+                )
+                DispatchQueue.main.async {
+                    self.artworkRequests.remove(key)
+                    guard let artworkTrack,
+                          artworkTrack.identifier == track.identifier,
+                          let image = artworkTrack.artwork else { return }
+                    self.applyArtwork(
+                        image,
+                        revision: artworkTrack.artworkRevision,
+                        to: track
+                    )
+                }
+            }
+        } else if track.source == .spotify,
+           let url = URL(string: track.artworkURL),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
             var request = URLRequest(url: url)
             request.timeoutInterval = 8
             URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
@@ -489,8 +594,15 @@ final class NowPlayingMonitor {
     }
 
     private func readMusicArtwork() -> NSImage? {
+        // Check before sending an Apple Event so a background artwork refresh
+        // cannot relaunch Music after the user has quit it.
+        guard !NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.Music"
+        ).isEmpty else { return nil }
         let script = """
+        if application \"Music\" is not running then return \"\"
         tell application \"Music\"
+            if not (exists current track) then return \"\"
             if (count of artworks of current track) is 0 then return \"\"
             return raw data of artwork 1 of current track
         end tell

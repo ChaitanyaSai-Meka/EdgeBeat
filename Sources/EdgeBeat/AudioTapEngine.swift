@@ -9,7 +9,7 @@ final class AudioTapEngine {
 
         var errorDescription: String? {
             switch self {
-            case .unsupported: "Audio capture requires macOS 14.4 or newer."
+            case .unsupported: "Audio capture requires macOS 14.2 or newer."
             case let .coreAudio(operation, status): "\(operation) failed (OSStatus \(status))."
             }
         }
@@ -17,6 +17,7 @@ final class AudioTapEngine {
 
     var onSamples: (([Float], Double, UInt64) -> Void)?
     var onStatusChange: ((String?) -> Void)?
+    var onStartResult: ((UInt64, Bool) -> Void)?
 
     private let logger = Logger(subsystem: "com.chaitanya.edgebeat", category: "audio")
     private let controlQueue = DispatchQueue(label: "com.chaitanya.edgebeat.audio-control", qos: .utility)
@@ -26,6 +27,7 @@ final class AudioTapEngine {
     private var ioProcID: AudioDeviceIOProcID?
     private var format = AudioStreamBasicDescription()
     private var activeProcessID: pid_t?
+    private var activeSession: UInt64?
     private var hasReceivedSamples = false
     private var hasReportedEmptyBuffer = false
     private var pendingSamples: [Float] = []
@@ -40,21 +42,34 @@ final class AudioTapEngine {
     private func startOnControlQueue(processID: pid_t?, session: UInt64) {
         let processDescription = processID.map(String.init) ?? "global"
         logger.info("Starting audio tap for process \(processDescription, privacy: .public)")
-        guard activeProcessID != processID || tapID == kAudioObjectUnknown else { return }
+        guard activeProcessID != processID
+                || activeSession != session
+                || tapID == kAudioObjectUnknown else {
+            onStartResult?(session, true)
+            return
+        }
         stopOnControlQueue()
         do {
             try createTap(processID: processID, session: session)
             activeProcessID = processID
+            activeSession = session
             logger.notice("Audio tap started")
             onStatusChange?("Audio capture active - waiting for sound...")
+            onStartResult?(session, true)
         } catch {
             logger.error("Player-specific audio tap failed: \(error.localizedDescription, privacy: .public)")
             if processID != nil {
                 do {
                     try createTap(processID: nil, session: session)
-                    activeProcessID = nil
+                    // Keep the requested process identity even when the tap
+                    // had to fall back to a global mix. This prevents a
+                    // duplicate start for the same session from rebuilding a
+                    // healthy fallback tap.
+                    activeProcessID = processID
+                    activeSession = session
                     logger.notice("Global audio fallback started")
                     onStatusChange?("System-wide audio capture active - waiting for sound...")
+                    onStartResult?(session, true)
                     return
                 } catch {
                     stopOnControlQueue()
@@ -62,6 +77,7 @@ final class AudioTapEngine {
             }
             onStatusChange?(error.localizedDescription)
             logger.error("Global audio tap failed: \(error.localizedDescription, privacy: .public)")
+            onStartResult?(session, false)
         }
     }
 
@@ -75,6 +91,7 @@ final class AudioTapEngine {
         logger.info("Stopping audio tap")
         rollbackTapResources()
         activeProcessID = nil
+        activeSession = nil
     }
 
     private func createTap(processID: pid_t?, session: UInt64) throws {
@@ -161,8 +178,8 @@ final class AudioTapEngine {
             if #available(macOS 14.2, *) { AudioHardwareDestroyProcessTap(tapID) }
         }
         tapID = kAudioObjectUnknown
-        format = AudioStreamBasicDescription()
         ioQueue.sync {
+            format = AudioStreamBasicDescription()
             hasReceivedSamples = false
             hasReportedEmptyBuffer = false
             pendingSamples.removeAll(keepingCapacity: true)
@@ -208,17 +225,34 @@ final class AudioTapEngine {
         let channels = max(1, Int(format.mChannelsPerFrame))
 
         if format.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0 {
-            let frameCount = Int(buffers[0].mDataByteSize) / MemoryLayout<Float>.size
+            var frameCount = Int.max
+            var readableChannelCount = 0
+            for buffer in buffers {
+                guard buffer.mData != nil else { continue }
+                let bufferChannels = max(1, Int(buffer.mNumberChannels))
+                let sampleCount = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                let bufferFrameCount = sampleCount / bufferChannels
+                guard bufferFrameCount > 0 else { continue }
+                frameCount = min(frameCount, bufferFrameCount)
+                readableChannelCount += bufferChannels
+            }
+            guard frameCount != Int.max, readableChannelCount > 0 else { return [] }
             var mono = [Float](repeating: 0, count: frameCount)
-            var usedChannels = 0
             for buffer in buffers {
                 guard let data = buffer.mData else { continue }
                 let values = data.assumingMemoryBound(to: Float.self)
-                for frame in 0..<frameCount { mono[frame] += values[frame] }
-                usedChannels += 1
+                let bufferChannels = max(1, Int(buffer.mNumberChannels))
+                let availableFrames = (Int(buffer.mDataByteSize) / MemoryLayout<Float>.size)
+                    / bufferChannels
+                guard availableFrames >= frameCount else { continue }
+                for frame in 0..<frameCount {
+                    let offset = frame * bufferChannels
+                    for channel in 0..<bufferChannels {
+                        mono[frame] += values[offset + channel]
+                    }
+                }
             }
-            guard usedChannels > 0 else { return [] }
-            let divisor = Float(usedChannels)
+            let divisor = Float(readableChannelCount)
             for index in mono.indices { mono[index] /= divisor }
             return mono
         }

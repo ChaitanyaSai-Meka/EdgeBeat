@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct CompanionNowPlayingView: View {
@@ -10,6 +11,7 @@ struct CompanionNowPlayingView: View {
     @State private var anchorPosition: TimeInterval = 0
     @State private var anchorDate: Date?
     @State private var pendingSeekTarget: TimeInterval?
+    @State private var pendingSeekGeneration: UInt64 = 0
     @State private var backdropImage: NSImage?
     @State private var backdropIdentifier = ""
     @StateObject private var lyricsStore = LyricsStore()
@@ -29,6 +31,7 @@ struct CompanionNowPlayingView: View {
     private static let controlsHeight: CGFloat = 112
     private static let metadataHeight: CGFloat = 180
     private static let progressHeight: CGFloat = 64
+    private static let pendingSeekTimeout: TimeInterval = 2
 
     private struct LayoutMetrics {
         let artworkMinSide: CGFloat
@@ -64,7 +67,7 @@ struct CompanionNowPlayingView: View {
             if let pendingSeekTarget {
                 let tolerance = max(2, track.duration * 0.01)
                 guard abs(newValue - pendingSeekTarget) <= tolerance else { return }
-                self.pendingSeekTarget = nil
+                clearPendingSeek()
             }
             anchorPosition = newValue
             anchorDate = Date()
@@ -76,7 +79,7 @@ struct CompanionNowPlayingView: View {
         .onChange(of: track.identifier) { _, _ in
             scrubFraction = nil
             isBarHovered = false
-            pendingSeekTarget = nil
+            clearPendingSeek()
             updateBackdrop()
         }
         .onChange(of: track.artworkRevision) { _, _ in
@@ -907,28 +910,31 @@ struct CompanionNowPlayingView: View {
     }
 
     private var liveWaveform: some View {
-        Canvas { context, size in
-            let samples = downsampledWaveform
+        let samples = downsampledWaveform
+        let amplitude = waveformAmplitude
+        let tint = accent
+
+        return Canvas { context, size in
             guard !samples.isEmpty else { return }
 
             let centerY = size.height / 2
             let step = samples.count > 1 ? size.width / CGFloat(samples.count - 1) : size.width
             let upperPoints = samples.enumerated().map { index, sample in
                 let x = CGFloat(index) * step
-                let amplitude = CGFloat(sample) * size.height * waveformAmplitude
-                return CGPoint(x: x, y: centerY - amplitude)
+                let height = CGFloat(sample) * size.height * amplitude
+                return CGPoint(x: x, y: centerY - height)
             }
             let lowerPoints = samples.enumerated().map { index, sample in
                 let x = CGFloat(index) * step
-                let amplitude = CGFloat(sample) * size.height * waveformAmplitude
-                return CGPoint(x: x, y: centerY + amplitude)
+                let height = CGFloat(sample) * size.height * amplitude
+                return CGPoint(x: x, y: centerY + height)
             }
             let upperPath = smoothWaveformPath(through: upperPoints)
             let lowerPath = smoothWaveformPath(through: lowerPoints)
 
             let strokeStyle = StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
             let gradient = GraphicsContext.Shading.linearGradient(
-                Gradient(colors: [accent.opacity(0.22), accent, accent.opacity(0.22)]),
+                Gradient(colors: [tint.opacity(0.22), tint, tint.opacity(0.22)]),
                 startPoint: .zero,
                 endPoint: CGPoint(x: size.width, y: 0)
             )
@@ -1102,7 +1108,7 @@ struct CompanionNowPlayingView: View {
                 scrubFraction = nil
                 anchorPosition = target
                 anchorDate = Date()
-                pendingSeekTarget = target
+                setPendingSeekTarget(target)
                 onSeek(target, track.source)
             }
     }
@@ -1255,7 +1261,10 @@ struct CompanionNowPlayingView: View {
     private func openSourcePlayer() {
         if let processID = track.processID,
            let application = NSRunningApplication(processIdentifier: processID) {
-            application.activate(options: [.activateAllWindows])
+            _ = application.activate(
+                from: NSRunningApplication.current,
+                options: [.activateAllWindows]
+            )
             return
         }
 
@@ -1278,7 +1287,7 @@ struct CompanionNowPlayingView: View {
         let target = min(track.duration, max(0, resolvedPosition(at: Date()) + offset))
         anchorPosition = target
         anchorDate = Date()
-        pendingSeekTarget = target
+        setPendingSeekTarget(target)
         onSeek(target, track.source)
     }
 
@@ -1287,8 +1296,23 @@ struct CompanionNowPlayingView: View {
         let target = min(track.duration, max(0, timestamp))
         anchorPosition = target
         anchorDate = Date()
-        pendingSeekTarget = target
+        setPendingSeekTarget(target)
         onSeek(target, track.source)
+    }
+
+    private func setPendingSeekTarget(_ target: TimeInterval) {
+        pendingSeekGeneration &+= 1
+        let generation = pendingSeekGeneration
+        pendingSeekTarget = target
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pendingSeekTimeout) {
+            guard self.pendingSeekGeneration == generation else { return }
+            self.pendingSeekTarget = nil
+        }
+    }
+
+    private func clearPendingSeek() {
+        pendingSeekGeneration &+= 1
+        pendingSeekTarget = nil
     }
 
     private func formatTime(_ value: TimeInterval) -> String {
@@ -1354,6 +1378,13 @@ private struct SyncedLyricsViewport: View {
                             isUserScrolling = true
                         }
                 )
+                .overlay {
+                    ScrollWheelActivityMonitor { _ in
+                        isUserScrolling = true
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
+                }
 
                 if isUserScrolling, let focusID {
                     Button {
@@ -1404,6 +1435,57 @@ private struct SyncedLyricsViewport: View {
         )
         .equatable()
         .id(line.id)
+    }
+}
+
+private struct ScrollWheelActivityMonitor: NSViewRepresentable {
+    let onScroll: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ScrollWheelMonitorView {
+        let view = ScrollWheelMonitorView()
+        view.onScroll = onScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: ScrollWheelMonitorView, context: Context) {
+        nsView.onScroll = onScroll
+    }
+
+    static func dismantleNSView(_ nsView: ScrollWheelMonitorView, coordinator: ()) {
+        nsView.removeEventMonitor()
+    }
+}
+
+private final class ScrollWheelMonitorView: NSView {
+    var onScroll: ((CGFloat) -> Void)?
+    private var eventMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        removeEventMonitor()
+        guard window != nil else { return }
+
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
+            [weak self] event in
+            guard let self,
+                  let eventWindow = event.window,
+                  eventWindow === self.window else { return event }
+            let location = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(location) else { return event }
+            self.onScroll?(event.scrollingDeltaY)
+            return event
+        }
+    }
+
+    func removeEventMonitor() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+    }
+
+    deinit {
+        removeEventMonitor()
     }
 }
 

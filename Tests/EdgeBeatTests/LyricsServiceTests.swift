@@ -72,6 +72,60 @@ final class LyricsServiceTests: XCTestCase {
         XCTAssertEqual(LyricsURLProtocol.requestedDurations, ["180"])
     }
 
+    func testHourQualifiedSyncedTimestampsAreParsed() {
+        LyricsURLProtocol.reset()
+        defer { LyricsURLProtocol.reset() }
+
+        LyricsURLProtocol.response = { _ in
+            Data(#"{"syncedLyrics":"[1:02:03.45]Hour line\n[1:02:04.00]Next line"}"#.utf8)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LyricsURLProtocol.self]
+        let store = LyricsStore(session: URLSession(configuration: configuration))
+
+        store.load(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 4_000
+        )
+        waitForLoadedState(store)
+
+        guard case let .loaded(document) = store.state else {
+            return XCTFail("Expected synced lyrics to load")
+        }
+        XCTAssertEqual(document.lines[0].timestamp ?? -1, 3_723.45, accuracy: 0.001)
+        XCTAssertEqual(document.lines[1].timestamp ?? -1, 3_724, accuracy: 0.001)
+        XCTAssertEqual(document.lines.map(\.text), ["Hour line", "Next line"])
+    }
+
+    func testLyricsQueryEscapesLiteralPlusCharacters() {
+        LyricsURLProtocol.reset()
+        defer { LyricsURLProtocol.reset() }
+
+        LyricsURLProtocol.response = { _ in
+            Data(#"{"plainLyrics":"Lyrics"}"#.utf8)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LyricsURLProtocol.self]
+        let store = LyricsStore(session: URLSession(configuration: configuration))
+
+        store.load(
+            title: "AC+DC",
+            artist: "A+B",
+            album: "Live+Hits",
+            duration: 180
+        )
+        waitForLoadedState(store)
+
+        let query = LyricsURLProtocol.requestedPercentEncodedQueries.first ?? ""
+        XCTAssertTrue(query.contains("track_name=AC%2BDC"), query)
+        XCTAssertTrue(query.contains("artist_name=A%2BB"), query)
+        XCTAssertTrue(query.contains("album_name=Live%2BHits"), query)
+    }
+
     private func waitForLoadedState(_ store: LyricsStore) {
         if case .loaded = store.state { return }
 
@@ -106,6 +160,15 @@ private final class LyricsURLProtocol: URLProtocol {
                 .queryItems?
                 .first(where: { $0.name == "duration" })?
                 .value
+        }
+    }
+
+    static var requestedPercentEncodedQueries: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests.compactMap { request in
+            guard let url = request.url else { return nil }
+            return URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery
         }
     }
 
