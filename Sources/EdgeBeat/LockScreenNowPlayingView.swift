@@ -3,6 +3,13 @@ import SwiftUI
 struct LockScreenNowPlayingView: View {
     @ObservedObject var renderState: RenderState
     let onPlaybackCommand: (PlaybackCommand, PlayerSource) -> Void
+    let onSeek: (TimeInterval, PlayerSource) -> Void
+
+    @State private var scrubFraction: Double?
+    @State private var pendingSeekTarget: TimeInterval?
+    @State private var pendingSeekGeneration: UInt64 = 0
+
+    private static let pendingSeekTimeout: TimeInterval = 2
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
@@ -28,15 +35,12 @@ struct LockScreenNowPlayingView: View {
                     .lineLimit(1)
 
                 VStack(spacing: 3) {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                        .tint(accent)
-                        .animation(.linear(duration: 1), value: progress)
+                    seekBar
 
                     HStack {
-                        Text(formatTime(track.position))
+                        Text(formatTime(displayedPosition))
                         Spacer()
-                        Text("-\(formatTime(max(0, track.duration - track.position)))")
+                        Text("-\(formatTime(max(0, track.duration - displayedPosition)))")
                     }
                     .font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
                     .foregroundStyle(.tertiary)
@@ -87,6 +91,14 @@ struct LockScreenNowPlayingView: View {
         }
         .shadow(color: .black.opacity(0.28), radius: 14, y: 8)
         .padding(4)
+        .onChange(of: track.position) { _, position in
+            reconcilePendingSeek(with: position)
+        }
+        .onChange(of: track.identifier) { _, _ in
+            scrubFraction = nil
+            pendingSeekTarget = nil
+            pendingSeekGeneration &+= 1
+        }
     }
 
     private var track: NowPlayingTrack {
@@ -169,9 +181,110 @@ struct LockScreenNowPlayingView: View {
         .accessibilityLabel(label)
     }
 
-    private var progress: Double {
-        guard track.duration > 0 else { return 0 }
-        return min(1, max(0, track.position / track.duration))
+    private var canSeek: Bool {
+        (track.source == .spotify || track.source == .music)
+            && track.duration.isFinite
+            && track.duration > 0
+    }
+
+    private var displayedPosition: TimeInterval {
+        let position: TimeInterval
+        if let scrubFraction, track.duration > 0 {
+            position = scrubFraction * track.duration
+        } else {
+            position = pendingSeekTarget ?? track.position
+        }
+        guard position.isFinite else { return 0 }
+        guard track.duration.isFinite, track.duration > 0 else { return max(0, position) }
+        return min(track.duration, max(0, position))
+    }
+
+    private var displayedProgress: Double {
+        guard canSeek else { return 0 }
+        return min(1, max(0, displayedPosition / track.duration))
+    }
+
+    private var seekBar: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let knobSide: CGFloat = 10
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.18))
+                    .frame(height: 4)
+
+                Capsule()
+                    .fill(accent)
+                    .frame(width: width * displayedProgress, height: 4)
+
+                if scrubFraction != nil {
+                    Circle()
+                        .fill(.white)
+                        .frame(width: knobSide, height: knobSide)
+                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                        .offset(
+                            x: min(
+                                max(0, width * displayedProgress - knobSide / 2),
+                                max(0, width - knobSide)
+                            )
+                        )
+                }
+            }
+            .frame(width: width, height: proxy.size.height)
+            .contentShape(Rectangle())
+            .gesture(seekGesture(width: width), including: canSeek ? .all : .none)
+        }
+        .frame(height: 14)
+        .accessibilityLabel("Playback position")
+        .accessibilityValue(formatTime(displayedPosition))
+        .accessibilityAdjustableAction { direction in
+            let offset: TimeInterval = direction == .increment ? 10 : -10
+            commitSeek(to: displayedPosition + offset)
+        }
+    }
+
+    private func seekGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard canSeek else { return }
+                scrubFraction = seekFraction(atX: value.location.x, width: width)
+            }
+            .onEnded { value in
+                guard canSeek else {
+                    scrubFraction = nil
+                    return
+                }
+                let fraction = seekFraction(atX: value.location.x, width: width)
+                commitSeek(to: fraction * track.duration)
+            }
+    }
+
+    private func seekFraction(atX x: CGFloat, width: CGFloat) -> Double {
+        guard width > 0 else { return 0 }
+        return min(1, max(0, Double(x / width)))
+    }
+
+    private func commitSeek(to position: TimeInterval) {
+        guard canSeek, position.isFinite else { return }
+        let target = min(track.duration, max(0, position))
+        scrubFraction = nil
+        pendingSeekTarget = target
+        pendingSeekGeneration &+= 1
+        let generation = pendingSeekGeneration
+        onSeek(target, track.source)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pendingSeekTimeout) {
+            guard pendingSeekGeneration == generation else { return }
+            pendingSeekTarget = nil
+        }
+    }
+
+    private func reconcilePendingSeek(with position: TimeInterval) {
+        guard let target = pendingSeekTarget, position.isFinite else { return }
+        let tolerance = max(2, track.duration * 0.01)
+        guard abs(position - target) <= tolerance else { return }
+        pendingSeekTarget = nil
     }
 
     private func formatTime(_ value: TimeInterval) -> String {

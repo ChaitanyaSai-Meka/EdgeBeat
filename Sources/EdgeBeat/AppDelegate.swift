@@ -3,6 +3,12 @@ import Combine
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private struct AudioCaptureTarget: Equatable {
+        let source: PlayerSource
+        let processID: pid_t?
+        let trackIdentifier: String
+    }
+
     private let preferences = AppPreferences()
     private let renderState = RenderState()
     private lazy var overlay = OverlayController(
@@ -10,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderState: renderState,
         onPlaybackCommand: { [weak self] command, source in
             self?.nowPlaying.perform(command, for: source)
+        },
+        onSeek: { [weak self] position, source in
+            self?.nowPlaying.seek(to: position, for: source)
         }
     )
     private let nowPlaying = NowPlayingMonitor()
@@ -31,16 +40,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentTrack = NowPlayingTrack.empty
     private var isAudioCaptureRequested = false
     private var requestedAudioProcessID: pid_t?
+    private var audioCaptureRetryWork: DispatchWorkItem?
+    private var audioCaptureRetryAttempt = 0
+    private var audioCaptureRetryTarget: AudioCaptureTarget?
+    private var audioCaptureRetryToken: UInt64 = 0
     private var audioSessionGeneration = GenerationCounter()
     private var areDisplaysAsleep = false
     private var isCompanionVisible = false
     private var isTerminating = false
     private var cancellables: Set<AnyCancellable> = []
 
+    // Bound retries so a persistent Core Audio failure does not relaunch the
+    // helper indefinitely while still recovering from transient failures.
+    private static let maximumAudioCaptureAttempts = 3
+
+    private var currentAudioCaptureTarget: AudioCaptureTarget {
+        AudioCaptureTarget(
+            source: currentTrack.source,
+            processID: currentTrack.processID,
+            trackIdentifier: currentTrack.identifier
+        )
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        configureApplicationMenu()
         configureMenuBar()
         configurePlaybackPipeline()
         nowPlaying.setSource(preferences.playerSource)
+        renderState.setWaveFlowDirection(preferences.waveFlowDirection)
         observePreferences()
         applyPowerPolicy()
 
@@ -48,8 +75,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioOutputMonitor.start()
     }
 
+    private func configureApplicationMenu() {
+        let mainMenu = NSMenu()
+
+        let applicationItem = NSMenuItem()
+        let applicationMenu = NSMenu(title: "EdgeBeat")
+        applicationMenu.addItem(
+            NSMenuItem(
+                title: "About EdgeBeat",
+                action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+                keyEquivalent: ""
+            )
+        )
+        applicationMenu.addItem(.separator())
+
+        let hideItem = NSMenuItem(
+            title: "Hide EdgeBeat",
+            action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h"
+        )
+        hideItem.keyEquivalentModifierMask = [.command]
+        applicationMenu.addItem(hideItem)
+        applicationMenu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit EdgeBeat",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        quitItem.keyEquivalentModifierMask = [.command]
+        applicationMenu.addItem(quitItem)
+        applicationItem.submenu = applicationMenu
+        mainMenu.addItem(applicationItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        let minimizeItem = NSMenuItem(
+            title: "Minimize",
+            action: #selector(NSWindow.miniaturize(_:)),
+            keyEquivalent: "m"
+        )
+        minimizeItem.keyEquivalentModifierMask = [.command]
+        windowMenu.addItem(minimizeItem)
+        let zoomItem = NSMenuItem(
+            title: "Zoom",
+            action: #selector(NSWindow.performZoom(_:)),
+            keyEquivalent: ""
+        )
+        windowMenu.addItem(zoomItem)
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+
+        NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
+        audioCaptureRetryWork?.cancel()
+        audioCaptureRetryWork = nil
+        audioCaptureRetryToken &+= 1
         nowPlaying.stop()
         audioOutputMonitor.stop()
         invalidateAudioSession()
@@ -88,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             syncAudioCapture()
             syncDisplaySleepPrevention()
         }
-        menuBar.setLaunchAtLogin(SMAppService.mainApp.status == .enabled)
+        menuBar.setLaunchAtLogin(Self.isLaunchAtLoginRequested(SMAppService.mainApp.status))
         menuBar.setCompanionVisible(companionWindow.isVisible)
         self.menuBar = menuBar
     }
@@ -123,6 +208,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioTap.onStatusChange = { [weak self] message in
             DispatchQueue.main.async { self?.menuBar?.setCaptureStatus(message) }
         }
+        audioTap.onStartResult = { [weak self] session, started in
+            DispatchQueue.main.async {
+                self?.handleAudioCaptureResult(session: session, started: started)
+            }
+        }
     }
 
     private func observePreferences() {
@@ -147,6 +237,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] speed in self?.renderState.setWaveFlowSpeed(speed) }
             .store(in: &cancellables)
 
+        preferences.$waveFlowDirection
+            .removeDuplicates()
+            .sink { [weak self] direction in self?.renderState.setWaveFlowDirection(direction) }
+            .store(in: &cancellables)
+
         preferences.$displayTarget
             .removeDuplicates()
             .dropFirst()
@@ -167,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.applyPowerPolicy() }
             .store(in: &cancellables)
 
@@ -185,8 +281,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             && !areDisplaysAsleep
 
         if shouldCapture {
+            let target = currentAudioCaptureTarget
+            if audioCaptureRetryTarget != target {
+                audioCaptureRetryWork?.cancel()
+                audioCaptureRetryWork = nil
+                audioCaptureRetryToken &+= 1
+                audioCaptureRetryAttempt = 0
+                audioCaptureRetryTarget = target
+            }
             guard !isAudioCaptureRequested
                     || requestedAudioProcessID != currentTrack.processID else { return }
+            guard audioCaptureRetryAttempt < Self.maximumAudioCaptureAttempts else { return }
             if isAudioCaptureRequested {
                 renderState.resetAudio()
             }
@@ -196,6 +301,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             beatAnalyzer?.beginSession(session)
             audioTap.start(processID: currentTrack.processID, session: session)
         } else {
+            audioCaptureRetryWork?.cancel()
+            audioCaptureRetryWork = nil
+            audioCaptureRetryToken &+= 1
+            audioCaptureRetryAttempt = 0
+            audioCaptureRetryTarget = nil
             guard isAudioCaptureRequested else { return }
             isAudioCaptureRequested = false
             requestedAudioProcessID = nil
@@ -204,6 +314,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             renderState.resetAudio()
             menuBar?.setCaptureStatus(nil)
         }
+    }
+
+    private func handleAudioCaptureResult(session: UInt64, started: Bool) {
+        guard audioSessionGeneration.matches(session) else { return }
+
+        if started {
+            audioCaptureRetryWork?.cancel()
+            audioCaptureRetryWork = nil
+            audioCaptureRetryToken &+= 1
+            audioCaptureRetryAttempt = 0
+            return
+        }
+
+        guard !isTerminating,
+              isAudioCaptureRequested,
+              currentTrack.state == .playing,
+              !areDisplaysAsleep,
+              audioCaptureRetryTarget == currentAudioCaptureTarget else { return }
+
+        isAudioCaptureRequested = false
+        requestedAudioProcessID = nil
+        invalidateAudioSession()
+        renderState.resetAudio()
+        scheduleAudioCaptureRetry()
+    }
+
+    private func scheduleAudioCaptureRetry() {
+        guard audioCaptureRetryAttempt < Self.maximumAudioCaptureAttempts else { return }
+        audioCaptureRetryAttempt += 1
+        let delay = min(8.0, pow(2.0, Double(audioCaptureRetryAttempt - 1)))
+        audioCaptureRetryToken &+= 1
+        let token = audioCaptureRetryToken
+        let retry = DispatchWorkItem { [weak self] in
+            guard let self,
+                  !self.isTerminating,
+                  self.audioCaptureRetryToken == token else { return }
+            self.audioCaptureRetryWork = nil
+            self.syncAudioCapture()
+        }
+        audioCaptureRetryWork?.cancel()
+        audioCaptureRetryWork = retry
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: retry)
     }
 
     private func invalidateAudioSession() {
@@ -255,20 +407,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) -> Bool {
+        let service = SMAppService.mainApp
+        let currentStatus = service.status
+        let alreadyInDesiredState = enabled
+            ? currentStatus == .enabled || currentStatus == .requiresApproval
+            : currentStatus == .notRegistered
+
+        // SMAppService reports an error when asked to repeat an operation that
+        // has already been performed (for example, after the user changed the
+        // setting in System Settings). Treat that state as a no-op instead of
+        // surfacing a spurious warning.
+        if alreadyInDesiredState {
+            let actualEnabled = Self.isLaunchAtLoginRequested(service.status)
+            menuBar?.setLaunchAtLogin(actualEnabled)
+            return actualEnabled
+        }
+
         do {
             if enabled {
-                try SMAppService.mainApp.register()
+                try service.register()
             } else {
-                try SMAppService.mainApp.unregister()
+                try service.unregister()
             }
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "Unable to update Launch at Login"
-            alert.informativeText = error.localizedDescription
-            alert.alertStyle = .warning
-            alert.runModal()
+            // Re-read after a failed operation. Another actor may have
+            // changed the registration between the initial status check and
+            // the call, in which case the requested state is already true.
+            let actualStatus = service.status
+            let reachedRequestedState = enabled
+                ? actualStatus == .enabled || actualStatus == .requiresApproval
+                : actualStatus == .notRegistered
+            if !reachedRequestedState {
+                let alert = NSAlert()
+                alert.messageText = "Unable to update Launch at Login"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
         }
-        return SMAppService.mainApp.status == .enabled
+        let actualEnabled = Self.isLaunchAtLoginRequested(service.status)
+        menuBar?.setLaunchAtLogin(actualEnabled)
+        return actualEnabled
+    }
+
+    private static func isLaunchAtLoginRequested(_ status: SMAppService.Status) -> Bool {
+        status == .enabled || status == .requiresApproval
     }
 
     private func checkForUpdates() {

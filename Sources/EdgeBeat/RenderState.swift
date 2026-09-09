@@ -25,6 +25,7 @@ final class RenderState: ObservableObject {
     private var waveFlowLastFrameTime = 0.0
     private var isWaveFlowAnimationActive = false
     private var waveFlowSpeed = 0.5
+    private var waveFlowDirection = WaveFlowDirection.clockwise
 
     func update(track: NowPlayingTrack) {
         let artworkChanged = self.track.artworkRevision != track.artworkRevision
@@ -118,6 +119,10 @@ final class RenderState: ObservableObject {
         }
     }
 
+    func setWaveFlowDirection(_ direction: WaveFlowDirection) {
+        waveFlowDirection = direction
+    }
+
     private func restartWaveFlowTimer() {
         guard waveFlowSpeed > 0 else {
             stopWaveFlowTimer()
@@ -155,8 +160,10 @@ final class RenderState: ObservableObject {
         let baseSpeed = 0.14 * pow(waveFlowSpeed, 1.25)
         let musicMultiplier = 1 + level * 0.5 + bass * 0.4
             + waveFlowBeatEnvelope * 0.35
-        waveFlowPhase = (waveFlowPhase + elapsed * baseSpeed * musicMultiplier)
-            .truncatingRemainder(dividingBy: 1)
+        let nextPhase = waveFlowPhase
+            + elapsed * baseSpeed * musicMultiplier * waveFlowDirection.phaseSign
+        let remainder = nextPhase.truncatingRemainder(dividingBy: 1)
+        waveFlowPhase = remainder >= 0 ? remainder : remainder + 1
     }
 
     func update(audioOutputRoute: AudioOutputRoute) {

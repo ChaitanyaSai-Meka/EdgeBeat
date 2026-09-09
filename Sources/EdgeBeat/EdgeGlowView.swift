@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import SwiftUI
 
 struct DisplayNotch: Equatable {
@@ -35,18 +36,26 @@ struct EdgeGlowView: View {
     }
 
     private var glow: some View {
+        let audioLevel = renderState.level
         let idle = renderState.isPlaying ? 0.14 : 0
-        let audio = renderState.isPlaying ? renderState.level * 0.86 : 0
+        let audio = renderState.isPlaying ? audioLevel * 0.86 : 0
         let level = min(1, idle + audio + (renderState.beat ? 0.18 : 0))
+        // Keep the regular glow clearly visible between beats while preserving
+        // the existing audio-driven range and maximum brightness.
+        let normalGlowBoost = 0.28
+        let normalGlowLevel = renderState.isPlaying
+            ? min(1, level + normalGlowBoost)
+            : 0
         let waveform = renderState.waveform
-        let waveDepth = CGFloat(7 + renderState.level * 17 + (renderState.beat ? 5 : 0))
+        let waveDepth = CGFloat(7 + audioLevel * 17 + (renderState.beat ? 5 : 0))
         let beatBloom: CGFloat = renderState.beat ? 1.12 : 1
 
-        let baseGlowOpacity = level * preferences.intensity
+        let baseGlowOpacity = normalGlowLevel * preferences.intensity
         let thicknessScale = CGFloat(0.3 + preferences.thickness * 1.7)
         let waveFlow: WaveFlowParameters? = preferences.waveFlowEnabled && renderState.isPlaying
             ? WaveFlowParameters(
                 phase: renderState.waveFlowPhase,
+                direction: preferences.waveFlowDirection,
                 segmentLength: min(
                     0.62,
                     0.08 + preferences.waveLength * 0.44
@@ -99,9 +108,9 @@ struct EdgeGlowView: View {
                                  colors: flowColors,
                                  waveform: waveform,
                                  parameters: waveFlow,
-                                 coreWidth: (3.2 + CGFloat(renderState.level) * 2.2)
+                                 coreWidth: (3.2 + CGFloat(audioLevel) * 2.2)
                                     * waveWidthScale * beatBloom,
-                                 glowWidth: (13 + CGFloat(renderState.level) * 8)
+                                 glowWidth: (13 + CGFloat(audioLevel) * 8)
                                     * waveWidthScale * beatBloom,
                                  glowBlur: 12 * waveWidthScale,
                                  opacity: waveOpacity)
@@ -166,6 +175,7 @@ struct EdgeGlowView: View {
 
     private struct WaveFlowParameters {
         let phase: Double
+        let direction: WaveFlowDirection
         let segmentLength: Double
     }
 
@@ -174,6 +184,28 @@ struct EdgeGlowView: View {
         let normal: CGVector
         let position: Double
     }
+
+    private struct PerimeterCacheKey: Hashable {
+        let width: CGFloat
+        let height: CGFloat
+        let notchMinX: CGFloat?
+        let notchMaxX: CGFloat?
+        let notchDepth: CGFloat?
+        let notchCornerRadius: CGFloat?
+
+        init(size: CGSize, notch: DisplayNotch?) {
+            width = size.width
+            height = size.height
+            notchMinX = notch?.minX
+            notchMaxX = notch?.maxX
+            notchDepth = notch?.depth
+            notchCornerRadius = notch?.cornerRadius
+        }
+    }
+
+    private static let perimeterCacheLock = NSLock()
+    private static var perimeterCache: [PerimeterCacheKey: [PerimeterSample]] = [:]
+    private static let maximumPerimeterCacheEntries = 24
 
     private struct WaveFlowPoint {
         let point: CGPoint
@@ -297,8 +329,11 @@ struct EdgeGlowView: View {
     ) -> [WaveFlowPoint] {
         guard perimeter.count > 1 else { return [] }
         let segmentLength = max(0.04, parameters.segmentLength)
-        let lower = parameters.phase - segmentLength
-        let upper = parameters.phase
+        let direction = parameters.direction.phaseSign
+        let head = parameters.phase
+        let tail = head - direction * segmentLength
+        let lower = min(tail, head)
+        let upper = max(tail, head)
         var run: [(sample: PerimeterSample, position: Double)] = []
 
         for sample in perimeter {
@@ -309,16 +344,18 @@ struct EdgeGlowView: View {
                 }
             }
         }
-        run.sort { $0.position < $1.position }
+        run.sort {
+            direction > 0 ? $0.position < $1.position : $0.position > $1.position
+        }
         guard !run.isEmpty else { return [] }
 
         var points: [(sample: PerimeterSample, position: Double)] = []
-        points.append(interpolatedPerimeterSample(perimeter, at: lower))
+        points.append(interpolatedPerimeterSample(perimeter, at: tail))
         points.append(contentsOf: run.filter { $0.position > lower && $0.position < upper })
-        points.append(interpolatedPerimeterSample(perimeter, at: upper))
+        points.append(interpolatedPerimeterSample(perimeter, at: head))
 
         return points.map { entry in
-            let progress = CGFloat((entry.position - lower) / segmentLength)
+            let progress = CGFloat((entry.position - tail) * direction / segmentLength)
             return WaveFlowPoint(
                 point: insetPoint(entry.sample, by: inset),
                 normal: entry.sample.normal,
@@ -425,6 +462,31 @@ struct EdgeGlowView: View {
 
     private func perimeterSamples(in size: CGSize) -> [PerimeterSample] {
         guard size.width > 0, size.height > 0 else { return [] }
+        let key = PerimeterCacheKey(size: size, notch: notch)
+        Self.perimeterCacheLock.lock()
+        if let cached = Self.perimeterCache[key] {
+            Self.perimeterCacheLock.unlock()
+            return cached
+        }
+        Self.perimeterCacheLock.unlock()
+
+        let samples = buildPerimeterSamples(in: size)
+
+        Self.perimeterCacheLock.lock()
+        if let cached = Self.perimeterCache[key] {
+            Self.perimeterCacheLock.unlock()
+            return cached
+        }
+        if Self.perimeterCache.count >= Self.maximumPerimeterCacheEntries,
+           let evictionKey = Self.perimeterCache.keys.first {
+            Self.perimeterCache.removeValue(forKey: evictionKey)
+        }
+        Self.perimeterCache[key] = samples
+        Self.perimeterCacheLock.unlock()
+        return samples
+    }
+
+    private func buildPerimeterSamples(in size: CGSize) -> [PerimeterSample] {
         let cornerRadius = min(24, max(12, min(size.width, size.height) * 0.02))
         var boundary = topBoundarySamples(
             in: size,

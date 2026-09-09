@@ -45,8 +45,13 @@ final class MediaRemoteAdapter {
         scriptURL != nil && frameworkURL != nil
     }
 
-    func readTrack(preferredSource: PlayerSource) -> NowPlayingTrack? {
-        guard let payload: Payload = run(arguments: ["get", "--now"]) else { return nil }
+    func readTrack(preferredSource: PlayerSource,
+                   includeArtwork: Bool = false) -> NowPlayingTrack? {
+        var arguments = ["get", "--now"]
+        if !includeArtwork {
+            arguments.append("--no-artwork")
+        }
+        guard let payload: Payload = run(arguments: arguments) else { return nil }
         guard let title = payload.title, !title.isEmpty else { return nil }
 
         let bundleID = payload.parentApplicationBundleIdentifier ?? payload.bundleIdentifier ?? ""
@@ -58,7 +63,9 @@ final class MediaRemoteAdapter {
         }
         guard preferredSource == .automatic || preferredSource == source else { return nil }
 
-        let artworkData = payload.artworkData.flatMap { Data(base64Encoded: $0) }
+        let artworkData = includeArtwork
+            ? payload.artworkData.flatMap { Data(base64Encoded: $0) }
+            : nil
         let artwork = artworkData.flatMap(NSImage.init(data:))
         let identifier = payload.uniqueIdentifier
             ?? payload.contentItemIdentifier

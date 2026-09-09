@@ -1,35 +1,45 @@
 import CoreAudio
 import Foundation
+import OSLog
 
 final class AudioOutputMonitor {
     var onRouteChange: ((AudioOutputRoute) -> Void)?
 
+    private let logger = Logger(subsystem: "com.chaitanya.edgebeat", category: "audio-output")
     private let listenerQueue = DispatchQueue(label: "com.chaitanya.edgebeat.audio-output")
     private var isListening = false
 
     func start() {
         guard !isListening else { return }
-        isListening = true
         var address = Self.defaultOutputAddress
-        AudioObjectAddPropertyListenerBlock(
+        let status = AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject),
             &address,
             listenerQueue,
             listenerBlock
         )
+        guard status == noErr else {
+            logger.error("Failed to monitor the default audio output (OSStatus \(status))")
+            return
+        }
+        isListening = true
         publishCurrentRoute()
     }
 
     func stop() {
         guard isListening else { return }
-        isListening = false
         var address = Self.defaultOutputAddress
-        AudioObjectRemovePropertyListenerBlock(
+        let status = AudioObjectRemovePropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject),
             &address,
             listenerQueue,
             listenerBlock
         )
+        if status != noErr {
+            logger.error("Failed to stop monitoring the default audio output (OSStatus \(status))")
+            return
+        }
+        isListening = false
     }
 
     private lazy var listenerBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in

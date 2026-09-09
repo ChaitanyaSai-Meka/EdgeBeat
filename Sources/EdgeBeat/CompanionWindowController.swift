@@ -3,6 +3,14 @@ import SwiftUI
 
 private final class CompanionWindow: NSWindow {
     var handleKeyEvent: ((NSEvent) -> Bool)?
+    var willToggleFullScreen: (() -> Void)?
+
+    override func toggleFullScreen(_ sender: Any?) {
+        if !styleMask.contains(.fullScreen) {
+            willToggleFullScreen?()
+        }
+        super.toggleFullScreen(sender)
+    }
 
     override func keyDown(with event: NSEvent) {
         if handleKeyEvent?(event) == true { return }
@@ -15,6 +23,7 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
 
     private var hideAfterExitingFullScreen = false
     private var reportedVisibility = false
+    private var activationPolicyBeforeFullScreen: NSApplication.ActivationPolicy?
 
     init(
         renderState: RenderState,
@@ -69,6 +78,9 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
         }
         super.init(window: window)
         window.delegate = self
+        window.willToggleFullScreen = { [weak self] in
+            self?.prepareForFullScreen()
+        }
         window.setFrameAutosaveName("EdgeBeat.CompanionNowPlaying")
         if !window.setFrameUsingName("EdgeBeat.CompanionNowPlaying") {
             window.center()
@@ -97,7 +109,7 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
 
     func show() {
         guard let window else { return }
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
@@ -131,6 +143,26 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
         reportVisibility(true)
     }
 
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        prepareForFullScreen()
+    }
+
+    func window(
+        _ window: NSWindow,
+        willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions
+    ) -> NSApplication.PresentationOptions {
+        prepareForFullScreen()
+        // Preserve macOS's standard full-screen behavior: the menu bar stays
+        // hidden until the pointer reaches the top edge, then slides down.
+        return proposedOptions
+            .subtracting(.hideMenuBar)
+            .union(.autoHideMenuBar)
+    }
+
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        restoreActivationPolicy()
+    }
+
     func windowDidExitFullScreen(_ notification: Notification) {
         guard let window else { return }
         restoreInteractiveWindow()
@@ -142,6 +174,7 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
             window.makeKeyAndOrderFront(nil)
             reportVisibility(true)
         }
+        restoreActivationPolicy()
     }
 
     private func restoreInteractiveWindow() {
@@ -149,6 +182,20 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
         window.makeFirstResponder(nil)
         window.contentView?.needsLayout = true
         window.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    private func prepareForFullScreen() {
+        guard activationPolicyBeforeFullScreen == nil else { return }
+        activationPolicyBeforeFullScreen = NSApp.activationPolicy()
+        guard NSApp.activationPolicy() != .regular else { return }
+        _ = NSApp.setActivationPolicy(.regular)
+    }
+
+    private func restoreActivationPolicy() {
+        guard let originalPolicy = activationPolicyBeforeFullScreen else { return }
+        activationPolicyBeforeFullScreen = nil
+        guard NSApp.activationPolicy() != originalPolicy else { return }
+        _ = NSApp.setActivationPolicy(originalPolicy)
     }
 
     private func reportVisibility(_ visible: Bool) {
