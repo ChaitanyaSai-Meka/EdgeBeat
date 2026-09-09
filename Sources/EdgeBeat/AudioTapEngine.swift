@@ -4,12 +4,10 @@ import OSLog
 
 final class AudioTapEngine {
     enum TapError: LocalizedError {
-        case unsupported
         case coreAudio(String, OSStatus)
 
         var errorDescription: String? {
             switch self {
-            case .unsupported: "Audio capture requires macOS 14.2 or newer."
             case let .coreAudio(operation, status): "\(operation) failed (OSStatus \(status))."
             }
         }
@@ -95,7 +93,6 @@ final class AudioTapEngine {
     }
 
     private func createTap(processID: pid_t?, session: UInt64) throws {
-        guard #available(macOS 14.2, *) else { throw TapError.unsupported }
         let description: CATapDescription
         if let processID, let objectID = processObjectID(for: processID) {
             description = CATapDescription(stereoMixdownOfProcesses: [objectID])
@@ -175,7 +172,7 @@ final class AudioTapEngine {
         }
         aggregateDeviceID = kAudioObjectUnknown
         if tapID != kAudioObjectUnknown {
-            if #available(macOS 14.2, *) { AudioHardwareDestroyProcessTap(tapID) }
+            AudioHardwareDestroyProcessTap(tapID)
         }
         tapID = kAudioObjectUnknown
         ioQueue.sync {
