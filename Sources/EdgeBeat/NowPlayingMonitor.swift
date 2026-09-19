@@ -382,6 +382,9 @@ final class NowPlayingMonitor {
         let fields = output.components(separatedBy: String(UnicodeScalar(31)))
         guard fields.count >= 9 else { return nil }
         let state = PlaybackState(rawValue: fields[0]) ?? .unavailable
+        guard !fields[2].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
         let identifier = fields[5]
         let processID = NSRunningApplication.runningApplications(
             withBundleIdentifier: "com.apple.Music"
@@ -429,6 +432,9 @@ final class NowPlayingMonitor {
         let title = descriptor.atIndex(2)?.stringValue ?? ""
         let artist = descriptor.atIndex(3)?.stringValue ?? ""
         let album = descriptor.atIndex(4)?.stringValue ?? ""
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
         let artworkURL = descriptor.atIndex(5)?.stringValue ?? ""
         let trackIdentifier = descriptor.atIndex(6)?.stringValue ?? ""
         let rawDuration = descriptor.atIndex(7)?.doubleValue ?? 0

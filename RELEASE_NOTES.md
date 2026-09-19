@@ -6,14 +6,20 @@ record.
 
 ## Current Release
 
+### [EdgeBeat 1.4.0](docs/releases/1.4.0.md) - 2026-09-13
+
+Adds smoother audio-reactive lighting, a more useful Now Playing menu, and
+release notes in the update checker. Recent tracks can be opened directly in
+Spotify or Apple Music.
+
+## Previous Releases
+
 ### [EdgeBeat 1.3.0](docs/releases/1.3.0.md) - 2026-09-09
 
 Refines the companion Now Playing window with an Apple Music-inspired lyrics
 view, stronger active-line focus, improved responsive layouts, more robust LRC
 parsing, corrected native full-screen menu-bar behavior, and interactive
 lock-screen progress seeking.
-
-## Previous Releases
 
 ### [EdgeBeat 1.2.0](docs/releases/1.2.0.md) - 2026-08-26
 

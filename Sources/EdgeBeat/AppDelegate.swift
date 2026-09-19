@@ -463,8 +463,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let alert = NSAlert()
             switch result {
             case let .updateAvailable(currentVersion, release):
+                let releaseName = release.name.isEmpty ? release.version : release.name
                 alert.messageText = "EdgeBeat \(release.version) is available"
-                alert.informativeText = "You are currently using EdgeBeat \(currentVersion)."
+                alert.informativeText = "You are currently using EdgeBeat \(currentVersion).\n\n\(releaseName)"
+                alert.accessoryView = releaseNotesAccessoryView(release.body)
                 alert.addButton(withTitle: "View Release")
                 alert.addButton(withTitle: "Not Now")
                 if alert.runModal() == .alertFirstButtonReturn {
@@ -481,5 +483,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.runModal()
             }
         }
+    }
+
+    private func releaseNotesAccessoryView(_ notes: String) -> NSView {
+        let width: CGFloat = 430
+        let height: CGFloat = 184
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+
+        let heading = NSTextField(labelWithString: "What's New")
+        heading.font = .systemFont(ofSize: 12, weight: .semibold)
+        heading.frame = NSRect(x: 0, y: height - 24, width: width, height: 18)
+        container.addSubview(heading)
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height - 30))
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .bezelBorder
+        scrollView.drawsBackground = false
+
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: width - 16, height: height - 30))
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.font = .systemFont(ofSize: 12)
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        let maximumNotesLength = 12_000
+        textView.string = notes.count > maximumNotesLength
+            ? String(notes.prefix(maximumNotesLength)) + "\n..."
+            : notes
+        textView.textContainer?.widthTracksTextView = true
+        if let textContainer = textView.textContainer,
+           let layoutManager = textView.layoutManager {
+            layoutManager.ensureLayout(for: textContainer)
+            let contentHeight = layoutManager.usedRect(for: textContainer).height
+                + textView.textContainerInset.height * 2
+            textView.frame.size.height = max(textView.frame.height, contentHeight)
+        }
+        scrollView.documentView = textView
+        container.addSubview(scrollView)
+        return container
     }
 }

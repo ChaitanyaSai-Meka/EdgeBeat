@@ -84,6 +84,10 @@ final class LyricsStore: ObservableObject {
     }
 
     private struct LyricsResponse: Decodable {
+        let trackName: String?
+        let artistName: String?
+        let albumName: String?
+        let duration: Double?
         let plainLyrics: String?
         let syncedLyrics: String?
         let instrumental: Bool?
@@ -105,6 +109,13 @@ final class LyricsStore: ObservableObject {
     private var requestGeneration = 0
     private var currentKey: LookupKey?
     private var cache: [LookupKey: CachedResult] = [:]
+
+    private var userAgent: String {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "1.0"
+        return "EdgeBeat/\(version) (macOS)"
+    }
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -131,11 +142,11 @@ final class LyricsStore: ObservableObject {
 
         let key = LookupKey(title: title, artist: artist, album: album,
                             duration: duration)
-        guard !key.title.isEmpty, !key.artist.isEmpty else {
+        guard !key.title.isEmpty else {
             task?.cancel()
             task = nil
             currentKey = nil
-            state = .unavailable
+            state = .failed("The current player did not provide a track title.")
             return
         }
 
@@ -168,26 +179,23 @@ final class LyricsStore: ObservableObject {
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("EdgeBeat", forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         state = .loading
 
         task = session.dataTask(with: request) { [weak self] data, response, error in
+            guard let self else { return }
             let result = Self.process(data: data, response: response, error: error)
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      self.requestGeneration == generation,
-                      self.currentKey == key else { return }
-                self.task = nil
-                switch result {
-                case let .document(document):
-                    self.cacheResult(.document(document), for: key)
-                    self.state = .loaded(document)
-                case .unavailable:
-                    self.cacheResult(.unavailable, for: key)
-                    self.state = .unavailable
-                case let .failed(message):
-                    self.state = .failed(message)
-                }
+            if case .unavailable = result {
+                self.beginSearch(
+                    title: title,
+                    artist: artist,
+                    album: album,
+                    duration: duration,
+                    key: key,
+                    generation: generation
+                )
+            } else {
+                self.finish(result, key: key, generation: generation)
             }
         }
         task?.resume()
@@ -226,18 +234,33 @@ final class LyricsStore: ObservableObject {
         duration: TimeInterval
     ) -> URL? {
         var components = URLComponents(string: "https://lrclib.net/api/get")
-        let durationValue = normalizedLyricsDuration(duration).map(String.init)
-        let queryItems: [(name: String, value: String?)] = [
-            ("track_name", title),
-            ("artist_name", artist),
-            ("album_name", album),
-            ("duration", durationValue)
+        var queryItems: [(name: String, value: String)] = [
+            ("track_name", title)
         ]
+        if !artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(("artist_name", artist))
+        }
+        if !album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(("album_name", album))
+        }
+        if let durationValue = normalizedLyricsDuration(duration) {
+            queryItems.append(("duration", String(durationValue)))
+        }
         components?.percentEncodedQuery = queryItems.map { name, value in
             let encodedName = Self.percentEncodeQueryComponent(name)
-            guard let value else { return encodedName }
             return encodedName + "=" + Self.percentEncodeQueryComponent(value)
         }.joined(separator: "&")
+        return components?.url
+    }
+
+    private func makeSearchURL(title: String, artist: String, album: String) -> URL? {
+        let query = [title, artist, album]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !query.isEmpty else { return nil }
+        var components = URLComponents(string: "https://lrclib.net/api/search")
+        components?.percentEncodedQuery = "q=" + Self.percentEncodeQueryComponent(query)
         return components?.url
     }
 
@@ -276,6 +299,50 @@ final class LyricsStore: ObservableObject {
             return .failed("The lyrics response could not be read.")
         }
 
+        return document(from: payload)
+    }
+
+    private static func processSearch(
+        data: Data?,
+        response: URLResponse?,
+        error: Error?,
+        title: String,
+        artist: String,
+        album: String,
+        duration: TimeInterval
+    ) -> LookupResult {
+        if let error {
+            if (error as? URLError)?.code == .cancelled {
+                return .failed("The lyrics request was cancelled.")
+            }
+            return .failed(error.localizedDescription)
+        }
+
+        guard let response = response as? HTTPURLResponse else {
+            return .failed("The lyrics service returned an invalid response.")
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            return .failed("The lyrics service returned HTTP \(response.statusCode).")
+        }
+        guard let data,
+              let payload = try? JSONDecoder().decode([LyricsResponse].self, from: data) else {
+            return .failed("The lyrics response could not be read.")
+        }
+
+        let ranked = payload.sorted {
+            score($0, title: title, artist: artist, album: album, duration: duration)
+                > score($1, title: title, artist: artist, album: album, duration: duration)
+        }
+        for candidate in ranked {
+            if case let .document(document) = document(from: candidate) {
+                return .document(document)
+            }
+        }
+        return .unavailable
+    }
+
+    private static func document(from payload: LyricsResponse) -> LookupResult {
+
         if let syncedLyrics = payload.syncedLyrics,
            let lines = parseSyncedLyrics(syncedLyrics), !lines.isEmpty {
             return .document(
@@ -310,6 +377,100 @@ final class LyricsStore: ObservableObject {
             )
         }
         return .unavailable
+    }
+
+    private static func score(
+        _ candidate: LyricsResponse,
+        title: String,
+        artist: String,
+        album: String,
+        duration: TimeInterval
+    ) -> Int {
+        let normalizedTitle = normalize(title)
+        let normalizedArtist = normalize(artist)
+        let normalizedAlbum = normalize(album)
+        let candidateTitle = normalize(candidate.trackName ?? "")
+        let candidateArtist = normalize(candidate.artistName ?? "")
+        let candidateAlbum = normalize(candidate.albumName ?? "")
+        var score = 0
+
+        if candidateTitle == normalizedTitle { score += 70 }
+        else if candidateTitle.contains(normalizedTitle) || normalizedTitle.contains(candidateTitle) { score += 35 }
+        if !normalizedArtist.isEmpty, candidateArtist == normalizedArtist { score += 30 }
+        else if !normalizedArtist.isEmpty, candidateArtist.contains(normalizedArtist) { score += 15 }
+        if !normalizedAlbum.isEmpty, candidateAlbum == normalizedAlbum { score += 15 }
+
+        if let candidateDuration = candidate.duration,
+           duration.isFinite, duration > 0 {
+            let difference = abs(candidateDuration - duration)
+            score += max(0, 20 - Int(difference.rounded()))
+        }
+        if candidate.syncedLyrics != nil { score += 5 }
+        if candidate.plainLyrics != nil { score += 2 }
+        return score
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private func beginSearch(
+        title: String,
+        artist: String,
+        album: String,
+        duration: TimeInterval,
+        key: LookupKey,
+        generation: Int
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.requestGeneration == generation,
+                  self.currentKey == key else { return }
+            guard let url = self.makeSearchURL(title: title, artist: artist, album: album) else {
+                self.finish(.unavailable, key: key, generation: generation)
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue(self.userAgent, forHTTPHeaderField: "User-Agent")
+            self.state = .loading
+            self.task = self.session.dataTask(with: request) { [weak self] data, response, error in
+                let result = Self.processSearch(
+                    data: data,
+                    response: response,
+                    error: error,
+                    title: title,
+                    artist: artist,
+                    album: album,
+                    duration: duration
+                )
+                self?.finish(result, key: key, generation: generation)
+            }
+            self.task?.resume()
+        }
+    }
+
+    private func finish(_ result: LookupResult, key: LookupKey, generation: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.requestGeneration == generation,
+                  self.currentKey == key else { return }
+            self.task = nil
+            switch result {
+            case let .document(document):
+                self.cacheResult(.document(document), for: key)
+                self.state = .loaded(document)
+            case .unavailable:
+                self.cacheResult(.unavailable, for: key)
+                self.state = .unavailable
+            case let .failed(message):
+                self.state = .failed(message)
+            }
+        }
     }
 
     private static func parsePlainLyrics(_ lyrics: String) -> [LyricsLine] {
