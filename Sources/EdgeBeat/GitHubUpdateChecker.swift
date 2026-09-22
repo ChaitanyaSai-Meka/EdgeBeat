@@ -4,6 +4,8 @@ final class GitHubUpdateChecker {
     struct Release {
         let version: String
         let pageURL: URL
+        let name: String
+        let body: String
     }
 
     enum CheckResult {
@@ -15,10 +17,14 @@ final class GitHubUpdateChecker {
     private struct GitHubRelease: Decodable {
         let tagName: String
         let pageURL: URL
+        let name: String?
+        let body: String?
 
         enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
             case pageURL = "html_url"
+            case name
+            case body
         }
     }
 
@@ -119,8 +125,18 @@ final class GitHubUpdateChecker {
             : releasesPage
         return .updateAvailable(
             currentVersion: currentVersion,
-            release: Release(version: githubRelease.tagName, pageURL: pageURL)
+            release: Release(
+                version: githubRelease.tagName,
+                pageURL: pageURL,
+                name: githubRelease.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+                body: normalizedReleaseNotes(githubRelease.body)
+            )
         )
+    }
+
+    private func normalizedReleaseNotes(_ body: String?) -> String {
+        let notes = body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return notes.isEmpty ? "No release notes were published for this version." : notes
     }
 
     private func isEdgeBeatReleaseURL(_ url: URL) -> Bool {

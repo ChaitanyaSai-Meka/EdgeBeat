@@ -47,7 +47,7 @@ struct CompanionNowPlayingView: View {
                 background
                 header.frame(height: Self.headerHeight, alignment: .top)
 
-                if track.state == .unavailable {
+                if isTrackUnavailable {
                     unavailableContent
                         .frame(
                             width: proxy.size.width,
@@ -99,6 +99,11 @@ struct CompanionNowPlayingView: View {
         renderState.track
     }
 
+    private var isTrackUnavailable: Bool {
+        track.state == .unavailable
+            || track.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var accent: Color {
         Color(nsColor: renderState.palette.accent)
     }
@@ -114,7 +119,6 @@ struct CompanionNowPlayingView: View {
     private var canLoadLyrics: Bool {
         canControlPlayback
             && !track.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !track.artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var lyricsRequestKey: String {
@@ -219,13 +223,13 @@ struct CompanionNowPlayingView: View {
                     .foregroundStyle(accent)
             }
 
-            if track.state != .unavailable {
+            if !isTrackUnavailable {
                 sourceStatus
             }
 
             Spacer()
 
-            if track.state != .unavailable {
+            if !isTrackUnavailable {
                 HStack(spacing: 10) {
                     lyricsToggle
                     routeSummary
@@ -500,7 +504,25 @@ struct CompanionNowPlayingView: View {
 
                 Spacer()
 
-                Button(action: copyTrackInfo) {
+                Menu {
+                    Button("Copy Track Info", action: copyTrackInfo)
+                    Divider()
+                    Text("Recent Tracks")
+                        .font(.caption)
+                    if renderState.recentTracks.isEmpty {
+                        Text("No recent tracks")
+                    } else {
+                        ForEach(renderState.recentTracks.prefix(6), id: \.identifier) { item in
+                            Button(recentTrackMenuTitle(item)) {
+                                openRecentTrack(item)
+                            }
+                        }
+                    }
+                    Divider()
+                    Text("Up Next")
+                        .font(.caption)
+                    Text("Queue is managed by \(sourceName)")
+                } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.76))
@@ -508,8 +530,8 @@ struct CompanionNowPlayingView: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .help("Copy Track Info")
-                .accessibilityLabel("Copy Track Info")
+                .help("More playback options")
+                .accessibilityLabel("More playback options")
                 .disabled(!canControlPlayback)
             }
 
@@ -584,9 +606,13 @@ struct CompanionNowPlayingView: View {
             Image(systemName: "music.note")
                 .font(.system(size: 42, weight: .medium))
                 .foregroundStyle(accent)
-            Text("No music is playing")
+            Text(track.state == .unavailable ? "No music is playing" : "Waiting for track details")
                 .font(.system(size: 24, weight: .semibold))
-            Text("Start Spotify or Apple Music to see the current track here.")
+            Text(
+                track.state == .unavailable
+                    ? "Start Spotify or Apple Music to see the current track here."
+                    : "The music player is connected but has not provided the current track metadata yet."
+            )
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
         }
@@ -1128,11 +1154,7 @@ struct CompanionNowPlayingView: View {
                     isActive: track.isShuffleEnabled
                 )
 
-                utilityButton(
-                    icon: "doc.on.doc",
-                    label: "Copy Track Info",
-                    action: copyTrackInfo
-                )
+                moreMenu
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1234,6 +1256,37 @@ struct CompanionNowPlayingView: View {
         .disabled(!canControlPlayback)
     }
 
+    private var moreMenu: some View {
+        Menu {
+            Button("Copy Track Info", action: copyTrackInfo)
+            Divider()
+            Text("Recent Tracks").font(.caption)
+            if renderState.recentTracks.isEmpty {
+                Text("No recent tracks")
+            } else {
+                ForEach(renderState.recentTracks.prefix(6), id: \.identifier) { item in
+                    Button(recentTrackMenuTitle(item)) {
+                        openRecentTrack(item)
+                    }
+                }
+            }
+            Divider()
+            Text("Up Next").font(.caption)
+            Text("Queue is managed by \(sourceName)")
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 38, height: 38)
+                .background(.thinMaterial, in: Circle())
+                .overlay { Circle().stroke(.white.opacity(0.16), lineWidth: 1) }
+        }
+        .menuStyle(.borderlessButton)
+        .help("More playback options")
+        .accessibilityLabel("More playback options")
+        .disabled(!canControlPlayback)
+    }
+
     private var sourceName: String {
         switch track.source {
         case .spotify: "Spotify"
@@ -1256,6 +1309,53 @@ struct CompanionNowPlayingView: View {
         guard !components.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(components.joined(separator: " - "), forType: .string)
+    }
+
+    private func recentTrackMenuTitle(_ item: NowPlayingTrack) -> String {
+        let title = item.title.isEmpty ? "Untitled" : item.title
+        let artist = item.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        return artist.isEmpty ? title : "\(title) - \(artist)"
+    }
+
+    private func openRecentTrack(_ item: NowPlayingTrack) {
+        let trimmedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedArtist = item.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return }
+
+        if item.source == .spotify,
+           let directURL = spotifyURL(for: item.identifier) {
+            NSWorkspace.shared.open(directURL)
+            return
+        }
+
+        let query = [trimmedTitle, trimmedArtist].filter { !$0.isEmpty }.joined(separator: " ")
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = item.source == .spotify ? "open.spotify.com" : "music.apple.com"
+        if item.source == .spotify {
+            let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
+            guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: allowed) else {
+                return
+            }
+            components.percentEncodedPath = "/search/" + encodedQuery
+        } else {
+            components.path = "/us/search"
+            components.queryItems = [URLQueryItem(name: "term", value: query)]
+        }
+        guard let url = components.url else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func spotifyURL(for identifier: String) -> URL? {
+        let value = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !value.hasPrefix("spotify-track:") else { return nil }
+        if value.hasPrefix("spotify:track:") {
+            return URL(string: value)
+        }
+        guard value.range(of: "^[A-Za-z0-9]{10,}$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return URL(string: "spotify:track:\(value)")
     }
 
     private func openSourcePlayer() {

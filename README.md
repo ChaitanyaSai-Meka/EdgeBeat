@@ -8,7 +8,7 @@ The application runs from the menu bar, stays visible over full-screen apps,
 supports multiple displays, follows the physical MacBook notch, and can show an
 interactive now-playing card on the lock screen.
 
-Current version: `1.3.0`
+Current version: `1.4.0`
 
 ## Features
 
@@ -447,8 +447,9 @@ Important components:
 - Track metadata and artwork are used only to render the interface.
 - Spotify artwork may be downloaded from the artwork URL when the fallback path is
   active.
-- Lyrics are requested only when the Lyrics control is selected. The current
-  track title, artist, album, and duration are sent to LRCLIB for that lookup.
+- Lyrics are requested only when the Lyrics control is selected. EdgeBeat first
+  tries the current title, artist, album, and duration, then falls back to an
+  LRCLIB search when player metadata does not exactly match the catalog.
 - EdgeBeat does not upload listening history or captured audio.
 
 ## Compatibility Notes

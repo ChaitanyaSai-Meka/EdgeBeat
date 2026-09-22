@@ -39,7 +39,7 @@ struct EdgeGlowView: View {
         let audioLevel = renderState.level
         let idle = renderState.isPlaying ? 0.14 : 0
         let audio = renderState.isPlaying ? audioLevel * 0.86 : 0
-        let level = min(1, idle + audio + (renderState.beat ? 0.18 : 0))
+        let level = min(1, idle + audio + renderState.beatEnvelope * 0.1)
         // Keep the regular glow clearly visible between beats while preserving
         // the existing audio-driven range and maximum brightness.
         let normalGlowBoost = 0.28
@@ -47,8 +47,8 @@ struct EdgeGlowView: View {
             ? min(1, level + normalGlowBoost)
             : 0
         let waveform = renderState.waveform
-        let waveDepth = CGFloat(7 + audioLevel * 17 + (renderState.beat ? 5 : 0))
-        let beatBloom: CGFloat = renderState.beat ? 1.12 : 1
+        let waveDepth = CGFloat(7 + audioLevel * 17 + renderState.beatEnvelope * 4)
+        let beatBloom: CGFloat = 1 + CGFloat(renderState.beatEnvelope) * 0.1
 
         let baseGlowOpacity = normalGlowLevel * preferences.intensity
         let thicknessScale = CGFloat(0.3 + preferences.thickness * 1.7)

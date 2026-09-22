@@ -286,6 +286,7 @@ final class OverlayController {
         let shouldShow = preferences.isScreenLocked
             && preferences.nowPlayingCardEnabled
             && renderState.track.state != .unavailable
+            && !renderState.track.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard shouldShow else {
             cardPanel?.disableLockScreenVisibility()
             cardPanel?.orderOut(nil)
