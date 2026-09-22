@@ -1333,7 +1333,8 @@ struct CompanionNowPlayingView: View {
         components.scheme = "https"
         components.host = item.source == .spotify ? "open.spotify.com" : "music.apple.com"
         if item.source == .spotify {
-            guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
+            guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: allowed) else {
                 return
             }
             components.percentEncodedPath = "/search/" + encodedQuery

@@ -164,6 +164,9 @@ final class RenderState: ObservableObject {
             self?.advanceWaveFlow()
         }
         waveFlowTimer?.tolerance = interval * 0.05
+        if let timer = waveFlowTimer {
+            RunLoop.current.add(timer, forMode: .common)
+        }
     }
 
     private func stopWaveFlowTimer() {
@@ -214,6 +217,9 @@ final class RenderState: ObservableObject {
             self?.advanceAudioSmoothing()
         }
         audioSmoothingTimer?.tolerance = interval * 0.05
+        if let timer = audioSmoothingTimer {
+            RunLoop.current.add(timer, forMode: .common)
+        }
     }
 
     private func stopAudioSmoothingTimer() {
@@ -262,7 +268,6 @@ final class RenderState: ObservableObject {
             }
             waveform = smoothed
         }
-        objectWillChange.send()
     }
 
     private func smoothingCoefficient(from current: Double, to target: Double,
