@@ -24,6 +24,8 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
     private var hideAfterExitingFullScreen = false
     private var reportedVisibility = false
     private var activationPolicyBeforeFullScreen: NSApplication.ActivationPolicy?
+    private let makeContentView: () -> NSView
+    private var isContentAttached = false
 
     init(
         renderState: RenderState,
@@ -46,13 +48,15 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.fullScreenPrimary]
         window.isMovableByWindowBackground = false
-        window.contentView = NSHostingView(
-            rootView: CompanionNowPlayingView(
-                renderState: renderState,
-                onPlaybackCommand: onPlaybackCommand,
-                onSeek: onSeek
+        makeContentView = {
+            NSHostingView(
+                rootView: CompanionNowPlayingView(
+                    renderState: renderState,
+                    onPlaybackCommand: onPlaybackCommand,
+                    onSeek: onSeek
+                )
             )
-        )
+        }
         window.handleKeyEvent = { [weak renderState] event in
             guard let renderState else { return false }
             let track = renderState.track
@@ -109,6 +113,7 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
 
     func show() {
         guard let window else { return }
+        attachContent(true)
         NSApp.activate()
         if window.isMiniaturized {
             window.deminiaturize(nil)
@@ -201,6 +206,16 @@ final class CompanionWindowController: NSWindowController, NSWindowDelegate {
     private func reportVisibility(_ visible: Bool) {
         guard reportedVisibility != visible else { return }
         reportedVisibility = visible
+        attachContent(visible)
         onVisibilityChange?(visible)
+    }
+
+    /// SwiftUI keeps ticking the progress TimelineView and observing
+    /// RenderState inside an ordered-out window, which cost several percent of
+    /// CPU for a window nobody could see. The view exists only while shown.
+    private func attachContent(_ attached: Bool) {
+        guard let window, isContentAttached != attached else { return }
+        isContentAttached = attached
+        window.contentView = attached ? makeContentView() : NSView()
     }
 }
