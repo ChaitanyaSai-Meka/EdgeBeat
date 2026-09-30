@@ -403,6 +403,14 @@ final class NowPlayingMonitor {
     }
 
     private func readSpotify() -> NowPlayingTrack? {
+        // Compiling `tell application "Spotify"` needs Spotify's dictionary.
+        // When Spotify is not installed, macOS answers with a modal "Where is
+        // Spotify?" chooser that never returns, and every poll after it hangs
+        // behind that dialog. Only ask a player that is actually running.
+        guard !NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.spotify.client"
+        ).isEmpty else { return nil }
+
         let script = """
         if application "Spotify" is not running then return {}
         tell application "Spotify"
